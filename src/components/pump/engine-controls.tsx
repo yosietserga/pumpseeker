@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { usePumpStore } from "@/lib/pump/store";
+import { InfoTip } from "@/components/pump/info-tip";
 import type { EngineConfig, Role } from "@/lib/pump/types";
 
 /**
@@ -79,8 +80,13 @@ export function EngineControls({ role }: { role: Role }) {
               <CardTitle className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
                 <Settings2 className="h-4 w-4 text-emerald-400" aria-hidden />
                 Parámetros del motor
+                <InfoTip
+                  term="PARÁMETROS EN VIVO"
+                  hint="Los mismos umbrales del doorman original, editables sin reiniciar: criterios de detección, gate anti-flicker, y toda la configuración del paper trader y trailing. Aplicar convierte el perfil en CUSTOM."
+                  side="bottom"
+                />
                 <span className="hidden font-mono text-[10px] font-normal text-zinc-500 sm:inline">
-                  (los 6 criterios del doorman + trader)
+                  (los criterios del doorman + trader)
                 </span>
               </CardTitle>
               <div className="flex items-center gap-2">

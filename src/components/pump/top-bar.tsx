@@ -14,6 +14,7 @@ import { RoleBadge, UserManager } from "@/components/pump/auth-gate";
 import { usePumpStore } from "@/lib/pump/store";
 import type { ProfileName, Role } from "@/lib/pump/types";
 import { cn } from "@/lib/utils";
+import { InfoTip } from "@/components/pump/info-tip";
 
 const PROFILE_LABELS: Record<ProfileName, string> = {
   SCALPING: "Scalping — pumps intraminuto",
@@ -68,54 +69,86 @@ export function TopBar({
 
         {/* estados */}
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <Badge
-            className={cn(
-              "gap-1.5 border font-mono text-[10px]",
-              status === "RUNNING" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-              status === "BOOTING" && "border-amber-500/40 bg-amber-500/10 text-amber-300",
-              status === "STOPPED" && "border-rose-500/40 bg-rose-500/10 text-rose-300"
-            )}
-            variant="outline"
+          <InfoTip
+            term="MOTOR"
+            hint="Estado del motor de detección: RUNNING = escaneando el mercado en vivo · BOOTING = calibrando baseline de sesión · STOPPED = detenido (puedes arrancarlo)."
+            side="bottom"
+            variant="wrap"
           >
-            <Radio className="h-3 w-3" aria-hidden />
-            motor {status}
-          </Badge>
-          <Badge
-            className={cn(
-              "gap-1.5 border font-mono text-[10px]",
-              feed === "LIVE" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-              feed === "POLLING" && "border-amber-500/40 bg-amber-500/10 text-amber-300",
-              (feed === "RECONNECTING" || feed === "DOWN") &&
-                "border-rose-500/40 bg-rose-500/10 text-rose-300"
-            )}
-            variant="outline"
-          >
-            Binance {feed}
-          </Badge>
-          <Badge
-            className={cn(
-              "gap-1.5 border font-mono text-[10px]",
-              socketConnected
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                : "border-zinc-700 bg-zinc-900 text-zinc-400"
-            )}
-            variant="outline"
-          >
-            <span className={cn("h-1.5 w-1.5 rounded-full", socketConnected ? "bg-emerald-400" : "bg-zinc-600")} aria-hidden />
-            ws {socketConnected ? "on" : "off"}
-          </Badge>
-          {liveMode !== "OFF" && (
             <Badge
               className={cn(
-                "gap-1 border font-mono text-[10px] font-bold",
-                liveMode === "LIVE"
-                  ? "animate-pulse border-rose-500/50 bg-rose-500/15 text-rose-300"
-                  : "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                "gap-1.5 border font-mono text-[10px]",
+                status === "RUNNING" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+                status === "BOOTING" && "border-amber-500/40 bg-amber-500/10 text-amber-300",
+                status === "STOPPED" && "border-rose-500/40 bg-rose-500/10 text-rose-300"
               )}
               variant="outline"
             >
-              {liveMode === "LIVE" ? "● LIVE" : "TESTNET"}
+              <Radio className="h-3 w-3" aria-hidden />
+              motor {status}
             </Badge>
+          </InfoTip>
+          <InfoTip
+            term="FEED DE MERCADO"
+            hint="Conexión con Binance: LIVE = websocket en vivo · POLLING = fallback REST (el stream cayó, sigue funcionando) · RECONNECTING/DOWN = reconectando."
+            side="bottom"
+            variant="wrap"
+          >
+            <Badge
+              className={cn(
+                "gap-1.5 border font-mono text-[10px]",
+                feed === "LIVE" && "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+                feed === "POLLING" && "border-amber-500/40 bg-amber-500/10 text-amber-300",
+                (feed === "RECONNECTING" || feed === "DOWN") &&
+                  "border-rose-500/40 bg-rose-500/10 text-rose-300"
+              )}
+              variant="outline"
+            >
+              Binance {feed}
+            </Badge>
+          </InfoTip>
+          <InfoTip
+            term="WEBSOCKET"
+            hint="Canal en tiempo real navegador ↔ motor: sin él el dashboard solo refresca cada pocos segundos vía REST. Si se apaga, se reconecta solo."
+            side="bottom"
+            variant="wrap"
+          >
+            <Badge
+              className={cn(
+                "gap-1.5 border font-mono text-[10px]",
+                socketConnected
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-400"
+              )}
+              variant="outline"
+            >
+              <span className={cn("h-1.5 w-1.5 rounded-full", socketConnected ? "bg-emerald-400" : "bg-zinc-600")} aria-hidden />
+              ws {socketConnected ? "on" : "off"}
+            </Badge>
+          </InfoTip>
+          {liveMode !== "OFF" && (
+            <InfoTip
+              term={liveMode === "LIVE" ? "⚠️ LIVE — DINERO REAL" : "TESTNET"}
+              hint={
+                liveMode === "LIVE"
+                  ? "Las señales del bot ejecutan órdenes REALES con tu dinero en el exchange seleccionado. Kill switch disponible en la tarjeta de Trading real."
+                  : "Las señales se ejecutan en el sandbox del exchange (testnet): flujo completo sin riesgo real."
+              }
+              side="bottom"
+              variant="wrap"
+            >
+              <Badge
+                className={cn(
+                  "gap-1 border font-mono text-[10px] font-bold",
+                  liveMode === "LIVE"
+                    ? "animate-pulse border-rose-500/50 bg-rose-500/15 text-rose-300"
+                    : "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                )}
+                variant="outline"
+              >
+                {liveMode === "LIVE" ? "● LIVE" : "TESTNET"}
+              </Badge>
+            </InfoTip>
           )}
           {/* usuario */}
           <div className="flex items-center gap-1.5">

@@ -28,6 +28,7 @@ import { usePumpStore } from "@/lib/pump/store";
 import { fmtMoney } from "@/lib/pump/format";
 import type { LiveMode, Role } from "@/lib/pump/types";
 import { cn } from "@/lib/utils";
+import { InfoTip } from "@/components/pump/info-tip";
 
 /**
  * LiveCard — trading REAL opt-in multi-exchange (SDKs Siebly).
@@ -118,6 +119,12 @@ export function LiveCard({ role }: { role: Role }) {
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm font-semibold text-zinc-100">
             <Zap className="h-4 w-4 text-amber-400" aria-hidden />
             Trading real — opt-in · multi-exchange
+            <InfoTip
+              term="TRADING REAL OPT-IN"
+              hint="El paper trading (dinero simulado) es el default y SIEMPRE corre. Aquí decides si las mismas señales se ejecutan con dinero real en el exchange que elijas — detección en Binance, ejecución en 9 exchanges."
+              formula="paper (siempre) + espejo real opcional"
+              side="bottom"
+            />
             <ModeBadge mode={live.mode} exchange={meta?.name ?? ""} />
             {live.mode !== "OFF" && (
               <span className="font-mono text-[10px] font-normal text-zinc-500">
@@ -142,9 +149,24 @@ export function LiveCard({ role }: { role: Role }) {
         {/* —— columna exchange —— */}
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-2">
-            <Stat label="PnL real hoy" value={fmtMoney(live.todayPnlUsd)} tone={live.todayPnlUsd >= 0 ? "green" : "red"} />
-            <Stat label="PnL real total" value={fmtMoney(live.realizedPnlUsd)} tone={live.realizedPnlUsd >= 0 ? "green" : "red"} />
-            <Stat label="Posiciones reales" value={String(live.openSymbols.length)} tone="neutral" />
+            <Stat
+              label="PnL real hoy"
+              value={fmtMoney(live.todayPnlUsd)}
+              tone={live.todayPnlUsd >= 0 ? "green" : "red"}
+              hint="Resultado REAL del día en el exchange elegido (se reinicia a medianoche). Si llega al límite de pérdida diaria, el kill switch automático vende todo."
+            />
+            <Stat
+              label="PnL real total"
+              value={fmtMoney(live.realizedPnlUsd)}
+              tone={live.realizedPnlUsd >= 0 ? "green" : "red"}
+              hint="Resultado REAL acumulado desde que activaste el modo live por primera vez (comisiones reales del exchange incluidas)."
+            />
+            <Stat
+              label="Posiciones reales"
+              value={String(live.openSymbols.length)}
+              tone="neutral"
+              hint="Pares con orden de compra REAL ejecutada y aún no vendida — espejo exacto de las posiciones paper que ves arriba."
+            />
           </div>
 
           {live.lastError && (
@@ -210,7 +232,14 @@ export function LiveCard({ role }: { role: Role }) {
 
               {/* modo */}
               <div className="space-y-1.5">
-                <Label className="text-[11px] text-zinc-300">Modo</Label>
+                <Label className="flex items-center gap-1 text-[11px] text-zinc-300">
+                  Modo
+                  <InfoTip
+                    term="MODOS DE TRADING"
+                    hint="OFF = solo simulación (recomendado para empezar) · TESTNET = órdenes al sandbox del exchange, flujo idéntico sin riesgo · LIVE = dinero real. Tras cada reinicio del motor vuelve a OFF por seguridad."
+                    side="bottom"
+                  />
+                </Label>
                 <Select
                   value={live.mode}
                   disabled={busy || (live.mode === "OFF" && !keysForActive)}
@@ -477,16 +506,21 @@ function Stat({
   label,
   value,
   tone,
+  hint,
 }: {
   label: string;
   value: string;
   tone: "green" | "red" | "neutral";
+  hint?: string;
 }) {
   const cls =
     tone === "green" ? "text-emerald-400" : tone === "red" ? "text-rose-400" : "text-zinc-100";
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2">
-      <p className="font-mono text-[9px] uppercase tracking-wider text-zinc-500">{label}</p>
+      <p className="flex items-center gap-1 font-mono text-[9px] uppercase tracking-wider text-zinc-500">
+        {label}
+        {hint && <InfoTip term={label} hint={hint} side="bottom" />}
+      </p>
       <p className={cn("mt-1 font-mono text-base font-bold leading-none", cls)}>{value}</p>
     </div>
   );

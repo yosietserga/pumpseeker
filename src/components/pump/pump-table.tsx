@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoTip } from "@/components/pump/info-tip";
 import { usePumpStore } from "@/lib/pump/store";
 import { fmtPct, fmtPrice, fmtUsd } from "@/lib/pump/format";
 import type { MarketRow } from "@/lib/pump/types";
@@ -27,16 +28,54 @@ type SortKey =
   | "quoteVolume"
   | "hotStreak";
 
-const COLUMNS: { key: SortKey; label: string }[] = [
-  { key: "symbol", label: "PAR" },
-  { key: "score", label: "SCORE" },
-  { key: "priceChangePercent", label: "24H %" },
-  { key: "percentDiff", label: "Δ PRECIO" },
-  { key: "volumeDiff", label: "Δ VOL" },
-  { key: "volumeDiffProgressive", label: "Δ VOL INST" },
-  { key: "quoteVolume", label: "VOL 24H" },
-  { key: "hotStreak", label: "HOT" },
-];
+const COLUMNS: { key: SortKey; label: string; hint: string; formula?: string }[] = [
+    {
+      key: "symbol",
+      label: "PAR",
+      hint: "Par de trading contra USDT. La estrella ⭐ lo añade/quita de tu watchlist manual; ×N = cuántas veces disparó señal (moda).",
+    },
+    {
+      key: "score",
+      label: "SCORE",
+      hint: "Inercia de pump 0–100: qué tan explosiva es la combinación actual de volumen y precio. ≥50 suele ser pump en curso.",
+      formula: "45% Δvol inst + 25% momentum precio + 20% Δvol sesión + 10% hot streak",
+    },
+    {
+      key: "priceChangePercent",
+      label: "24H %",
+      hint: "Cambio de precio de la ventana rolling de 24h que reporta Binance (igual al % que ves en el exchange).",
+      formula: "(último − apertura24h) / apertura24h × 100",
+    },
+    {
+      key: "percentDiff",
+      label: "Δ PRECIO",
+      hint: "Drift de precio desde que el motor arrancó (baseline de sesión). Mide cuánto se movió desde que tú lo vigilas — no el 24h del exchange.",
+      formula: "%24h ahora − %24h del primer tick de la sesión",
+    },
+    {
+      key: "volumeDiff",
+      label: "Δ VOL",
+      hint: "Expansión del volumen 24h desde el arranque del motor: el combustible del pump. Verde = entró dinero nuevo.",
+      formula: "(vol ahora − vol baseline) / vol ahora × 100",
+    },
+    {
+      key: "volumeDiffProgressive",
+      label: "Δ VOL INST",
+      hint: "Aceleración instantánea de volumen entre ticks consecutivos. Es el indicador más temprano de un pump arrancando.",
+      formula: "(vol tick actual − vol tick anterior) / vol actual × 100",
+    },
+    {
+      key: "quoteVolume",
+      label: "VOL 24H",
+      hint: "Volumen negociado en las últimas 24h medido en USDT. El criterio de volumen mínimo filtra por este valor.",
+      formula: "criterio actual: ≥ mínimo configurado en Parámetros",
+    },
+    {
+      key: "hotStreak",
+      label: "HOT",
+      hint: "Ticks consecutivos con volumen acelerando (🔥N). Un streak largo y creciente = tape caliente, alguien está comprando sin parar.",
+    },
+  ];
 
 /** puntos de criterios — 7 dots verde/rojo, como el desglose del doorman */
 function CriteriaDots({ row }: { row: MarketRow }) {
@@ -128,8 +167,11 @@ export function PumpTable() {
             <TableHeader className="sticky top-0 z-10 bg-zinc-900">
               <TableRow className="border-zinc-800 hover:bg-transparent">
                 <TableHead className="w-9 px-2 py-2">
-                  <span className="sr-only">Watchlist</span>
-                  <Star className="h-3 w-3 text-zinc-600" aria-hidden />
+                  <InfoTip
+                    term="⭐ WATCHLIST"
+                    hint="Tus pares favoritos: siempre visibles en el radar, siempre incluidos en los snapshots de historia, y puedes limitar las señales solo a ellos."
+                    side="bottom"
+                  />
                 </TableHead>
                 {COLUMNS.map((col) => (
                   <TableHead
@@ -149,6 +191,7 @@ export function PumpTable() {
                       ) : (
                         <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden />
                       )}
+                      <InfoTip term={col.label} hint={col.hint} formula={col.formula} side="bottom" />
                     </span>
                   </TableHead>
                 ))}

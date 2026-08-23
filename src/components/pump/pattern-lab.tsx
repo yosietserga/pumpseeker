@@ -14,6 +14,7 @@ import {
 import { usePumpStore } from "@/lib/pump/store";
 import { fmtPct, fmtPrice, timeAgo } from "@/lib/pump/format";
 import { cn } from "@/lib/utils";
+import { InfoTip } from "@/components/pump/info-tip";
 
 /**
  * PatternLab — comparador de condiciones históricas.
@@ -103,6 +104,12 @@ export function PatternLab() {
         <CardTitle className="flex flex-wrap items-center gap-2 text-sm font-semibold text-zinc-100">
           <FlaskConical className="h-4 w-4 text-violet-400" aria-hidden />
           Laboratorio de patrones — historia vs presente
+          <InfoTip
+            term="LABORATORIO DE PATRONES"
+            hint="El motor fotografía el mercado cada pocos minutos. Este lab busca en esa historia momentos con condiciones SIMILARES a las actuales del par (misma dirección de momentum, Δvol y Δprecio cercanos, score parecido) y calcula qué pasó con el precio después — estadística de futuro sobre tu propia data."
+            formula="match: Δvol ±50% rel · Δprecio ±50% rel · score ±15 · mismo signo de momentum"
+            side="bottom"
+          />
           <span className="hidden font-mono text-[10px] font-normal text-zinc-500 md:inline">
             (cuando este par repitió condiciones similares, ¿qué pasó después?)
           </span>

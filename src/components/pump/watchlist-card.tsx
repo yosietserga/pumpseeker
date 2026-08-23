@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { usePumpStore } from "@/lib/pump/store";
+import { InfoTip } from "@/components/pump/info-tip";
 import type { MarketRow, Role } from "@/lib/pump/types";
 
 // referencias estables — evitan re-render infinito en useSyncExternalStore
@@ -59,9 +60,14 @@ export function WatchlistCard({ role }: { role: Role }) {
           <div className="flex items-center gap-2">
             <Label
               htmlFor="watchlist-only"
-              className="font-mono text-[10px] leading-none text-zinc-400"
+              className="flex items-center gap-1 font-mono text-[10px] leading-none text-zinc-400"
             >
               solo señales del watchlist
+              <InfoTip
+                term="SOLO WATCHLIST"
+                hint="Al activarlo, el criterio #7 exige que el par esté en tu watchlist para generar señales — ideal para enfocar el bot en tus pares favoritos."
+                side="bottom"
+              />
             </Label>
             <Switch
               id="watchlist-only"

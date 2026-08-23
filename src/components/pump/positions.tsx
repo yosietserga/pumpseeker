@@ -16,6 +16,7 @@ import { usePumpStore } from "@/lib/pump/store";
 import { fmtDuration, fmtMoney, fmtPct, fmtPrice, clockTime } from "@/lib/pump/format";
 import type { ClosedTrade, ExitReason, Position, Role } from "@/lib/pump/types";
 import { cn } from "@/lib/utils";
+import { InfoTip } from "@/components/pump/info-tip";
 
 // referencias estables — evitan re-render infinito en useSyncExternalStore
 const EMPTY_POSITIONS: Position[] = [];
@@ -114,12 +115,24 @@ export function Positions({ role }: { role: Role }) {
                 <table className="w-full min-w-[980px] caption-bottom text-sm">
                   <TableHeader className="sticky top-0 z-10 bg-zinc-900">
                     <TableRow className="border-zinc-800 hover:bg-transparent">
-                      {["PAR", "ENTRADA", "ACTUAL", "PICO", "SALIDAS (TP/SL/TRAIL)", "PnL VIVO", "DURACIÓN", ""].map((h) => (
+                      {([
+                        ["PAR", "Posición LONG de paper abierta en este par. LIVE = también existe una orden real espejo en el exchange elegido."],
+                        ["ENTRADA", "Precio de compra simulado (incluye 0.05% de slippage de entrada a mercado)."],
+                        ["ACTUAL", "Último precio del par en el stream, con la ganancia/pérdida % desde tu entrada."],
+                        ["PICO", "Máximo precio alcanzado desde la apertura — es el precio que persigue el trailing stop."],
+                        ["SALIDAS (TP/SL/TRAIL)", "Los tres niveles de salida: Take Profit fijo, Stop Loss inicial (se tacha cuando el trailing lo reemplaza) y el TRAIL dinámico con el % asegurado."],
+                        ["PnL VIVO", "Ganancia/pérdida flotante de la posición, neta de comisiones: cambia con cada tick."],
+                        ["DURACIÓN", "Tiempo transcurrido desde la apertura de la posición."],
+                        ["", "Cerrar la posición manualmente a precio de mercado (los TP/SL/trailing siguen corriendo solos si no la tocas)."],
+                      ] as [string, string][]).map(([h, hint]) => (
                         <TableHead
-                          key={h}
+                          key={h || "acciones"}
                           className="whitespace-nowrap px-3 py-2 font-mono text-[10px] uppercase text-zinc-500"
                         >
-                          {h}
+                          <span className="inline-flex items-center gap-1">
+                            {h}
+                            <InfoTip term={h || "CERRAR"} hint={hint} side="bottom" />
+                          </span>
                         </TableHead>
                       ))}
                     </TableRow>
@@ -243,13 +256,24 @@ export function Positions({ role }: { role: Role }) {
                 <table className="w-full min-w-[960px] caption-bottom text-sm">
                   <TableHeader className="sticky top-0 z-10 bg-zinc-900">
                     <TableRow className="border-zinc-800 hover:bg-transparent">
-                      {["PAR", "ENTRADA → SALIDA", "MOTIVO", "PnL", "ROE", "FEES", "DURACIÓN", "HORA"].map(
-                        (h) => (
+                      {([
+                        ["PAR", "Par operado en el trade cerrado."],
+                        ["ENTRADA → SALIDA", "Precio de compra y de venta simulados."],
+                        ["MOTIVO", "TP = take profit · SL = stop loss · TRAIL = trailing stop (cerró siguiendo al pico) · MANUAL = cierre humano."],
+                        ["PnL", "Resultado neto del trade en USDT, ya descontadas las comisiones de entrada y salida."],
+                        ["ROE", "Retorno sobre el monto de la operación (PnL / tamaño del trade)."],
+                        ["FEES", "Comisiones taker simuladas pagadas: entrada + salida."],
+                        ["DURACIÓN", "Tiempo total de la posición abierta."],
+                        ["HORA", "Momento del cierre."],
+                      ] as [string, string][]).map(([h, hint]) => (
                           <TableHead
                             key={h}
                             className="whitespace-nowrap px-3 py-2 font-mono text-[10px] uppercase text-zinc-500"
                           >
-                            {h}
+                            <span className="inline-flex items-center gap-1">
+                              {h}
+                              <InfoTip term={h} hint={hint} side="bottom" />
+                            </span>
                           </TableHead>
                         )
                       )}
