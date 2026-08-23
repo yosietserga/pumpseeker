@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   AlertTriangle,
   BellRing,
+  ExternalLink,
   FlaskConical,
   KeyRound,
   Loader2,
@@ -29,14 +30,14 @@ import type { LiveMode, Role } from "@/lib/pump/types";
 import { cn } from "@/lib/utils";
 
 /**
- * LiveCard — trading REAL opt-in (paper sigue siendo el default y el ledger).
+ * LiveCard — trading REAL opt-in multi-exchange (SDKs Siebly).
  *
- * Seguridad por diseño:
- *  - keys API solo en memoria del motor (nunca en el navegador ni en DB)
- *  - TESTNET para probar el flujo completo sin riesgo
- *  - cap por orden + límite de pérdida diaria con kill switch automático
- *  - el modo se fuerza a OFF tras cada reinicio del motor
- *  - KILL SWITCH manual: vende todo a mercado y desactiva
+ * Detección en Binance (mayor liquidez) · Ejecución en 9 exchanges:
+ * Binance · Bybit · OKX · Bitget · Gate.io · KuCoin · HTX (Huobi) · Kraken · BitMart.
+ *
+ * Prefill: las credenciales se guardan CIFRADAS en disco (AES-256-GCM) y se
+ * recargan al arrancar — acceso rápido sin reingresarlas. El modo live sigue
+ * requiriendo reactivación manual tras cada reinicio (seguridad).
  *
  * Solo ADMIN (ver /api/engine ADMIN_ACTIONS).
  */
@@ -48,6 +49,7 @@ export function LiveCard({ role }: { role: Role }) {
 
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
+  const [passphrase, setPassphrase] = useState("");
   const [testMsg, setTestMsg] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [tgToken, setTgToken] = useState("");
@@ -59,22 +61,19 @@ export function LiveCard({ role }: { role: Role }) {
   const live = state.live;
   const telegram = state.telegram;
   const isAdmin = role === "ADMIN";
+  const exchanges = live.availableExchanges ?? [];
+  const meta =
+    exchanges.find((e) => e.id === live.exchange) ?? exchanges[0] ?? null;
+  const keysForActive = !!live.keysByExchange?.[live.exchange];
 
-  const saveKeys = async () => {
-    setTestMsg(null);
-    await control({ action: "setLiveKeys", apiKey, apiSecret });
-    setApiKey("");
-    setApiSecret("");
-  };
-
-  const testKeys = async (mode: "TESTNET" | "LIVE") => {
+  const testKeys = async () => {
     setTesting(true);
     setTestMsg(null);
     try {
       const res = await fetch("/api/engine", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "testLiveKeys", liveMode: mode }),
+        body: JSON.stringify({ action: "testExchangeKeys", exchange: live.exchange }),
       });
       const data = await res.json();
       setTestMsg(data.detail ?? data.error ?? "sin respuesta");
@@ -118,11 +117,11 @@ export function LiveCard({ role }: { role: Role }) {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="flex flex-wrap items-center gap-2 text-sm font-semibold text-zinc-100">
             <Zap className="h-4 w-4 text-amber-400" aria-hidden />
-            Trading real — opt-in
-            <ModeBadge mode={live.mode} />
+            Trading real — opt-in · multi-exchange
+            <ModeBadge mode={live.mode} exchange={meta?.name ?? ""} />
             {live.mode !== "OFF" && (
               <span className="font-mono text-[10px] font-normal text-zinc-500">
-                paper sigue corriendo en paralelo (paridad PnL)
+                detección Binance · ejecución {meta?.name}
               </span>
             )}
           </CardTitle>
@@ -163,11 +162,58 @@ export function LiveCard({ role }: { role: Role }) {
 
           {isAdmin ? (
             <>
+              {/* selector de exchange */}
+              <div className="space-y-1.5">
+                <Label className="text-[11px] text-zinc-300">Exchange de ejecución</Label>
+                <Select
+                  value={live.exchange}
+                  disabled={busy}
+                  onValueChange={(v) =>
+                    void control({ action: "setLiveConfig", exchange: v as typeof live.exchange })
+                  }
+                >
+                  <SelectTrigger className="h-9 border-zinc-800 bg-zinc-950 font-mono text-xs text-zinc-200">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="border-zinc-800 bg-zinc-900 text-zinc-200">
+                    {exchanges.map((e) => (
+                      <SelectItem key={e.id} value={e.id} className="font-mono text-xs">
+                        {e.name}
+                        {live.keysByExchange?.[e.id] ? " ✓" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* prefill badges por exchange */}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {exchanges.map((e) => (
+                    <span
+                      key={e.id}
+                      title={
+                        live.keysByExchange?.[e.id]
+                          ? `credenciales de ${e.name} guardadas (cifradas)`
+                          : `${e.name}: sin credenciales`
+                      }
+                      className={cn(
+                        "rounded border px-1.5 py-0.5 font-mono text-[9px]",
+                        live.keysByExchange?.[e.id]
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                          : "border-zinc-700 bg-zinc-800/40 text-zinc-500"
+                      )}
+                    >
+                      {e.name}
+                      {live.keysByExchange?.[e.id] ? " ✓" : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* modo */}
               <div className="space-y-1.5">
                 <Label className="text-[11px] text-zinc-300">Modo</Label>
                 <Select
                   value={live.mode}
-                  disabled={busy || (live.mode === "OFF" && !live.keysSet)}
+                  disabled={busy || (live.mode === "OFF" && !keysForActive)}
                   onValueChange={(v) => void control({ action: "setLiveConfig", liveMode: v as LiveMode })}
                 >
                   <SelectTrigger className="h-9 border-zinc-800 bg-zinc-950 font-mono text-xs text-zinc-200">
@@ -175,25 +221,49 @@ export function LiveCard({ role }: { role: Role }) {
                   </SelectTrigger>
                   <SelectContent className="border-zinc-800 bg-zinc-900 text-zinc-200">
                     <SelectItem value="OFF" className="font-mono text-xs">OFF — solo paper (recomendado)</SelectItem>
-                    <SelectItem value="TESTNET" className="font-mono text-xs" disabled={!live.keysSet}>
-                      TESTNET — sin riesgo (testnet.binance.vision)
+                    <SelectItem
+                      value="TESTNET"
+                      className="font-mono text-xs"
+                      disabled={!keysForActive || !meta?.testnetSupported}
+                    >
+                      TESTNET{!meta?.testnetSupported ? " (no disponible aquí)" : " — sin riesgo"}
                     </SelectItem>
-                    <SelectItem value="LIVE" className="font-mono text-xs text-rose-300" disabled={!live.keysSet}>
+                    <SelectItem
+                      value="LIVE"
+                      className="font-mono text-xs text-rose-300"
+                      disabled={!keysForActive}
+                    >
                       LIVE — dinero real ⚠️
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                {live.mode === "OFF" && !live.keysSet && (
+                {live.mode === "OFF" && !keysForActive && (
                   <p className="font-mono text-[10px] text-zinc-600">
-                    guarda las API keys para habilitar TESTNET/LIVE
+                    guarda las credenciales de {meta?.name} para habilitar TESTNET/LIVE
                   </p>
                 )}
               </div>
 
+              {/* credenciales del exchange activo */}
               <div className="space-y-1.5">
-                <Label className="flex items-center gap-1.5 text-[11px] text-zinc-300">
+                <Label className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-300">
                   <KeyRound className="h-3 w-3" aria-hidden />
-                  Binance API keys {live.keysSet && <span className="text-emerald-400">✓ guardadas (solo en memoria del motor)</span>}
+                  Credenciales {meta?.name}
+                  {keysForActive && (
+                    <span className="text-emerald-400">
+                      ✓ guardadas (cifradas — prefill tras reinicio)
+                    </span>
+                  )}
+                  {meta?.keyUrl && (
+                    <a
+                      href={meta.keyUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-auto inline-flex items-center gap-0.5 text-[10px] text-sky-400 hover:underline"
+                    >
+                      crear keys <ExternalLink className="h-2.5 w-2.5" aria-hidden />
+                    </a>
+                  )}
                 </Label>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Input
@@ -212,6 +282,16 @@ export function LiveCard({ role }: { role: Role }) {
                     className="h-9 border-zinc-800 bg-zinc-950 font-mono text-xs"
                     autoComplete="off"
                   />
+                  {meta?.needsPassphrase && (
+                    <Input
+                      type="password"
+                      placeholder={`${meta.passphraseLabel} (requerido)`}
+                      value={passphrase}
+                      onChange={(e) => setPassphrase(e.target.value)}
+                      className="h-9 border-zinc-800 bg-zinc-950 font-mono text-xs sm:col-span-2"
+                      autoComplete="off"
+                    />
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2 pt-1">
                   <Button
@@ -219,38 +299,40 @@ export function LiveCard({ role }: { role: Role }) {
                     variant="outline"
                     className="h-8 border-zinc-700 font-mono text-[10px] text-zinc-200 hover:bg-zinc-800"
                     disabled={busy || !apiKey || !apiSecret}
-                    onClick={() => void saveKeys()}
+                    onClick={() => {
+                      void control({
+                        action: "setExchangeKeys",
+                        exchange: live.exchange,
+                        apiKey,
+                        apiSecret,
+                        ...(passphrase ? { passphrase } : {}),
+                      });
+                      setApiKey("");
+                      setApiSecret("");
+                      setPassphrase("");
+                    }}
                   >
-                    Guardar keys
+                    Guardar (cifra en disco)
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
                     className="h-8 gap-1 border-sky-500/40 font-mono text-[10px] text-sky-300 hover:bg-sky-500/10"
-                    disabled={testing || !live.keysSet}
-                    onClick={() => void testKeys("TESTNET")}
+                    disabled={testing || !keysForActive}
+                    onClick={() => void testKeys()}
                   >
                     {testing ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <FlaskConical className="h-3 w-3" aria-hidden />}
-                    Probar (testnet)
+                    Probar conexión
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 border-zinc-700 font-mono text-[10px] text-zinc-300 hover:bg-zinc-800"
-                    disabled={testing || !live.keysSet}
-                    onClick={() => void testKeys("LIVE")}
-                  >
-                    Probar (live)
-                  </Button>
-                  {live.keysSet && (
+                  {keysForActive && (
                     <Button
                       size="sm"
                       variant="outline"
                       className="h-8 border-rose-500/40 font-mono text-[10px] text-rose-300 hover:bg-rose-500/10"
                       disabled={busy}
-                      onClick={() => void control({ action: "clearLiveKeys" })}
+                      onClick={() => void control({ action: "clearExchangeKeys", exchange: live.exchange })}
                     >
-                      Borrar keys
+                      Borrar credenciales
                     </Button>
                   )}
                 </div>
@@ -259,15 +341,15 @@ export function LiveCard({ role }: { role: Role }) {
                 )}
                 <p className="flex items-start gap-1.5 text-[10px] leading-snug text-zinc-600">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-500/70" aria-hidden />
-                  Crea keys SOLO con permiso de <span className="font-mono">spot trade</span> — sin
-                  retiros. Se guardan únicamente en la memoria del motor: tras un reinicio hay que
-                  reingresarlas (feature de seguridad, no bug).
+                  Keys con permiso de <span className="font-mono">trade</span> únicamente — sin
+                  retiros. Se guardan cifradas (AES-256-GCM) en el motor y se recargan solas tras
+                  reinicios; el modo live siempre requiere reactivación manual.
                 </p>
               </div>
             </>
           ) : (
             <p className="rounded border border-zinc-800 bg-zinc-950/50 px-3 py-2 font-mono text-[10px] text-zinc-500">
-              solo un ADMIN puede gestionar las keys y el modo de trading real
+              solo un ADMIN puede gestionar exchanges, credenciales y el modo de trading real
             </p>
           )}
         </div>
@@ -352,9 +434,8 @@ export function LiveCard({ role }: { role: Role }) {
                 </p>
               )}
               <p className="text-[10px] leading-snug text-zinc-600">
-                Recibe cada señal 🚀 (símbolo, score, Δvol, Δprecio) y cada cierre
-                (TP/SL/TRAIL con PnL) directamente en tu chat — el remake moderno del
-                node-notifier del original.
+                Recibe cada señal 🚀 y cada cierre (TP/SL/TRAIL con PnL) directamente en tu
+                chat — el remake del node-notifier del original.
               </p>
             </>
           ) : (
@@ -370,18 +451,18 @@ export function LiveCard({ role }: { role: Role }) {
   );
 }
 
-function ModeBadge({ mode }: { mode: LiveMode }) {
+function ModeBadge({ mode, exchange }: { mode: LiveMode; exchange: string }) {
   if (mode === "LIVE") {
     return (
       <span className="inline-flex animate-pulse items-center gap-1 rounded border border-rose-500/50 bg-rose-500/15 px-1.5 py-0.5 font-mono text-[9px] font-bold text-rose-300">
-        ● LIVE — DINERO REAL
+        ● LIVE {exchange}
       </span>
     );
   }
   if (mode === "TESTNET") {
     return (
       <span className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[9px] font-bold text-amber-300">
-        TESTNET
+        TESTNET {exchange}
       </span>
     );
   }

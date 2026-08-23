@@ -37,9 +37,33 @@ export type ExitReason = "TAKE_PROFIT" | "STOP_LOSS" | "TRAILING_STOP" | "MANUAL
 
 export type LiveMode = "OFF" | "TESTNET" | "LIVE";
 
+export type ExchangeId =
+  | "binance"
+  | "bybit"
+  | "okx"
+  | "bitget"
+  | "gateio"
+  | "kucoin"
+  | "htx"
+  | "kraken"
+  | "bitmart";
+
+export interface ExchangeInfo {
+  id: ExchangeId;
+  name: string;
+  testnetSupported: boolean;
+  needsPassphrase: boolean;
+  passphraseLabel: string;
+  keyUrl: string;
+}
+
 export interface LiveStatus {
   mode: LiveMode;
+  exchange: ExchangeId;
   keysSet: boolean;
+  /** prefill: exchanges con credenciales guardadas (cifradas en disco) */
+  keysByExchange: Record<string, boolean>;
+  availableExchanges: ExchangeInfo[];
   maxSizeUsd: number;
   dailyLossLimitUsd: number;
   openSymbols: string[];
@@ -124,6 +148,7 @@ export interface EngineConfig {
   feePct: number;
   /* —— live trading (opt-in) —— */
   liveMode: LiveMode;
+  liveExchange: ExchangeId;
   liveMaxSizeUsd: number;
   dailyLossLimitUsd: number;
   /* —— alertas telegram —— */
@@ -205,10 +230,10 @@ export type ControlAction =
   | { action: "closeAll" }
   | { action: "watchlistAdd"; symbol: string }
   | { action: "watchlistRemove"; symbol: string }
-  | { action: "setLiveConfig"; liveMode?: LiveMode; liveMaxSizeUsd?: number; dailyLossLimitUsd?: number }
-  | { action: "setLiveKeys"; apiKey: string; apiSecret: string }
-  | { action: "clearLiveKeys" }
-  | { action: "testLiveKeys"; liveMode: "TESTNET" | "LIVE" }
+  | { action: "setLiveConfig"; liveMode?: LiveMode; exchange?: ExchangeId; liveMaxSizeUsd?: number; dailyLossLimitUsd?: number }
+  | { action: "setExchangeKeys"; exchange: ExchangeId; apiKey: string; apiSecret: string; passphrase?: string }
+  | { action: "clearExchangeKeys"; exchange: ExchangeId }
+  | { action: "testExchangeKeys"; exchange: ExchangeId }
   | { action: "killSwitch" }
   | { action: "setTelegram"; botToken?: string; chatId?: string; enabled?: boolean }
   | { action: "testTelegram" };

@@ -84,6 +84,26 @@ export type ExitReason = "TAKE_PROFIT" | "STOP_LOSS" | "TRAILING_STOP" | "MANUAL
 
 export type LiveMode = "OFF" | "TESTNET" | "LIVE";
 
+export type ExchangeId =
+  | "binance"
+  | "bybit"
+  | "okx"
+  | "bitget"
+  | "gateio"
+  | "kucoin"
+  | "htx"
+  | "kraken"
+  | "bitmart";
+
+export interface ExchangeInfo {
+  id: ExchangeId;
+  name: string;
+  testnetSupported: boolean;
+  needsPassphrase: boolean;
+  passphraseLabel: string;
+  keyUrl: string;
+}
+
 /** Posición real espejo en el exchange (el ledger de verdad sigue siendo paper) */
 export interface LivePosition {
   symbol: string;
@@ -96,7 +116,11 @@ export interface LivePosition {
 /** Estado del módulo live — SIN secretos (nunca salen del motor) */
 export interface LiveStatus {
   mode: LiveMode;
+  exchange: ExchangeId;
   keysSet: boolean;
+  /** prefill: exchanges con credenciales guardadas (cifradas en disco) */
+  keysByExchange: Record<string, boolean>;
+  availableExchanges: ExchangeInfo[];
   maxSizeUsd: number;
   dailyLossLimitUsd: number;
   openSymbols: string[];
@@ -196,8 +220,10 @@ export interface EngineConfig {
   maxOpenPositions: number;
   /** comisión taker por lado % (modernización: honestidad de costos) */
   feePct: number;
-  /* —— live trading (opt-in, keys solo en memoria del motor) —— */
+  /* —— live trading (opt-in, credenciales cifradas en disco del motor) —— */
   liveMode: LiveMode;
+  /** exchange de ejecución (la detección siempre corre en Binance) */
+  liveExchange: ExchangeId;
   /** cap por orden real en USDT */
   liveMaxSizeUsd: number;
   /** límite de pérdida diaria real antes del kill switch automático (0 = off) */

@@ -23,9 +23,9 @@ async function requireSession(readOnly = false) {
 }
 
 const ADMIN_ACTIONS = new Set([
-  "setLiveKeys",
-  "clearLiveKeys",
-  "testLiveKeys",
+  "setExchangeKeys",
+  "clearExchangeKeys",
+  "testExchangeKeys",
   "setLiveConfig",
   "killSwitch",
   "setTelegram",

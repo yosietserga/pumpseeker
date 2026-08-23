@@ -32,8 +32,9 @@ export const BASE_CONFIG: EngineConfig = {
   trailingDistancePct: 1,
   maxOpenPositions: 5,
   feePct: 0.1,
-  /* —— live trading (opt-in): OFF por defecto, keys solo en memoria —— */
+  /* —— live trading (opt-in): OFF por defecto, detección en Binance + ejecución multi-exchange —— */
   liveMode: "OFF",
+  liveExchange: "binance",
   liveMaxSizeUsd: 50,
   dailyLossLimitUsd: 25,
   /* —— alertas telegram —— */

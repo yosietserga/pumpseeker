@@ -12,6 +12,9 @@ db/*.db
 db/*.db-journal
 *.log
 mini-services/pump-engine/watchlist.json
+mini-services/pump-engine/credentials.json
+mini-services/pump-engine/.credentials.key
+mini-services/pump-engine/prefs.json
 
 # entorno local (el .env del repo trae defaults seguros; los secretos van en .env.local)
 .env.local

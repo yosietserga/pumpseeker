@@ -66,11 +66,19 @@ function AuthScreen() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    // prefill del último email (acceso rápido)
+    try {
+      const last = localStorage.getItem("pumpseeker:lastEmail");
+      if (last) setEmail(last);
+    } catch {
+      /* sin localStorage */
+    }
     fetch("/api/auth/register")
       .then((r) => r.json())
       .then((d: { hasUsers: boolean }) => {
@@ -96,6 +104,12 @@ function AuthScreen() {
       }
       const r = await signIn("credentials", { email, password, redirect: false });
       if (r?.error) throw new Error("email o contraseña incorrectos");
+      try {
+        if (remember) localStorage.setItem("pumpseeker:lastEmail", email);
+        else localStorage.removeItem("pumpseeker:lastEmail");
+      } catch {
+        /* noop */
+      }
       // la sesión se refresca sola; el Gate re-renderiza
       window.location.reload();
     } catch (err) {
@@ -192,6 +206,18 @@ function AuthScreen() {
                 <p className="rounded border border-rose-500/30 bg-rose-500/10 px-3 py-2 font-mono text-[11px] text-rose-300">
                   {error}
                 </p>
+              )}
+
+              {mode === "login" && (
+                <label className="flex cursor-pointer select-none items-center gap-2 font-mono text-[10px] text-zinc-500">
+                  <input
+                    type="checkbox"
+                    checked={remember}
+                    onChange={(e) => setRemember(e.target.checked)}
+                    className="h-3 w-3 accent-emerald-500"
+                  />
+                  recordar email
+                </label>
               )}
 
               <Button

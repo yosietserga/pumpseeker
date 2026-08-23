@@ -73,8 +73,10 @@ function restHandler(req: IncomingMessage, res: ServerResponse): void {
           profile?: EngineConfig["profile"];
           symbol?: string;
           liveMode?: EngineConfig["liveMode"];
+          exchange?: import("./src/exchanges").ExchangeId;
           apiKey?: string;
           apiSecret?: string;
+          passphrase?: string;
           liveMaxSizeUsd?: number;
           dailyLossLimitUsd?: number;
           botToken?: string;
@@ -112,26 +114,39 @@ function restHandler(req: IncomingMessage, res: ServerResponse): void {
           case "setLiveConfig": {
             const r = engine.setLiveConfig({
               liveMode: payload.liveMode,
+              liveExchange: payload.exchange,
               liveMaxSizeUsd: payload.liveMaxSizeUsd,
               dailyLossLimitUsd: payload.dailyLossLimitUsd,
             });
             if (!r.ok) return send(400, { ok: false, error: r.error });
             return send(200, { ok: true, config: engine.config });
           }
-          case "setLiveKeys": {
-            const { apiKey, apiSecret } = payload as { apiKey?: string; apiSecret?: string };
-            if (!apiKey || !apiSecret) {
-              return send(400, { ok: false, error: "apiKey y apiSecret requeridos" });
+          case "setExchangeKeys": {
+            const { apiKey, apiSecret, passphrase } = payload as {
+              apiKey?: string;
+              apiSecret?: string;
+              passphrase?: string;
+            };
+            if (!payload.exchange) {
+              return send(400, { ok: false, error: "exchange requerido" });
             }
-            engine.setLiveKeys(apiKey, apiSecret);
+            const r = engine.setExchangeKeys(payload.exchange, {
+              apiKey: apiKey ?? "",
+              apiSecret: apiSecret ?? "",
+              passphrase,
+            });
+            if (!r.ok) return send(400, { ok: false, error: r.error });
             return send(200, { ok: true, keysSet: true });
           }
-          case "clearLiveKeys":
-            engine.clearLiveKeys();
-            return send(200, { ok: true, keysSet: false });
-          case "testLiveKeys": {
-            const mode = payload.liveMode === "LIVE" ? "LIVE" : "TESTNET";
-            const r = await engine.testLiveKeys(mode);
+          case "clearExchangeKeys":
+            if (!payload.exchange) {
+              return send(400, { ok: false, error: "exchange requerido" });
+            }
+            engine.clearExchangeKeys(payload.exchange);
+            return send(200, { ok: true });
+          case "testExchangeKeys": {
+            const testnet = payload.liveMode !== "LIVE";
+            const r = await engine.testExchangeKeys(payload.exchange ?? "binance", testnet);
             return send(r.ok ? 200 : 400, { ok: r.ok, detail: r.detail });
           }
           case "killSwitch":

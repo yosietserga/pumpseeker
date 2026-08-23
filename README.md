@@ -17,10 +17,14 @@ señal — automatizada con trailing stop, y un laboratorio de patrones con hist
 
 ## Características destacadas
 
-- **Trading real opt-in** — paper es el default; activa TESTNET (sin riesgo) o LIVE
-  con tus API keys de Binance (solo permiso de spot trade). Keys guardadas
-  **únicamente en memoria del motor**; kill switch manual + límite de pérdida
-  diaria con kill automático; el modo se fuerza a OFF tras cada reinicio.
+- **Trading real opt-in multi-exchange** — detección en Binance (470+ pares),
+  ejecución en **9 exchanges** vía los SDKs de [Siebly](https://github.com/sieblyio):
+  Binance · Bybit · OKX · Bitget · Gate.io · KuCoin · HTX/Huobi · Kraken · BitMart.
+  Modos OFF → TESTNET (Bybit/Binance) → LIVE. Kill switch manual + límite de
+  pérdida diaria con kill automático; el modo se fuerza a OFF tras cada reinicio.
+- **Credenciales con prefill** — las API keys se guardan **cifradas en disco
+  (AES-256-GCM)** y se recargan solas al arrancar el motor: acceso rápido sin
+  reingresarlas. Solo permiso de trade, nunca retiros.
 - **Multi-usuario con roles** — ADMIN (todo) / TRADER (control del motor) /
   VIEWER (solo lectura). Primer usuario = ADMIN. Basado en NextAuth + bcrypt.
 - **Alertas Telegram** — cada señal 🚀 y cada cierre (TP/SL/TRAIL con PnL)
@@ -127,15 +131,21 @@ Abre http://localhost:3000 — el primer usuario que se registra se convierte en
 ADMIN. El motor arranca solo, se conecta a Binance y comienza a detectar. El
 `watchlist.json` del motor persiste tus pares favoritos.
 
-### Trading real (opt-in)
+### Trading real (opt-in, multi-exchange)
 
-1. Como ADMIN: guarda tus API keys de Binance (solo permiso **spot trade**,
-   sin retiros) en la tarjeta "Trading real".
-2. Prueba con **TESTNET** (keys de testnet.binance.vision) — flujo completo sin riesgo.
-3. Ajusta el cap por orden (`liveMaxSizeUsd`) y el límite de pérdida diaria
+1. Como ADMIN: elige el exchange de ejecución en la tarjeta "Trading real"
+   (9 disponibles — cada uno con link directo para crear API keys).
+2. Guarda las credenciales (solo permiso **trade**, sin retiros; OKX/Bitget/
+   KuCoin piden passphrase, BitMart memo) — quedan cifradas y prefilled.
+3. Prueba con **TESTNET** (Binance/Bybit) — flujo completo sin riesgo.
+4. Ajusta el cap por orden (`liveMaxSizeUsd`) y el límite de pérdida diaria
    (`dailyLossLimitUsd` — 0 lo desactiva).
-4. Activa **LIVE** cuando confíes. El botón **KILL SWITCH** vende todo a mercado
+5. Activa **LIVE** cuando confíes. El botón **KILL SWITCH** vende todo a mercado
    y desactiva el modo en cualquier momento.
+
+Nota: la detección de pumps corre sobre el stream de Binance (mayor liquidez);
+las señales se ejecutan en el exchange que elijas con el mapeo de símbolos y
+lotes (LOT_SIZE) de cada exchange.
 
 ## Variables de entorno
 

@@ -23,6 +23,15 @@ import { PaperTrader } from "./trader";
 import { BinanceAdapter } from "./exchange";
 import { IngestClient } from "./ingest";
 import { LiveExecutor } from "./live";
+import {
+  EXCHANGES,
+  marketBuy,
+  marketSell,
+  testExchangeKeys,
+  type ExchangeCredentials,
+  type ExchangeId,
+} from "./exchanges";
+import { loadCredentials, saveCredentials, loadPrefs, savePrefs } from "./credentials";
 
 const WATCHLIST_FILE = fileURLToPath(new URL("../watchlist.json", import.meta.url));
 
@@ -67,7 +76,12 @@ export interface EngineEvents {
  * Además: watchlist manual persistente y snapshots de historia para patrones.
  */
 export class Engine {
-  private cfg: EngineConfig = { ...BASE_CONFIG };
+  private cfg: EngineConfig = {
+    ...BASE_CONFIG,
+    ...(EXCHANGES.some((e) => e.id === loadPrefs().liveExchange)
+      ? { liveExchange: loadPrefs().liveExchange as EngineConfig["liveExchange"] }
+      : {}),
+  };
   private tracker = new ChangeTracker();
   private detector = new PumpDetector(() => this.cfg);
   private trader = new PaperTrader(() => this.cfg);
@@ -75,12 +89,11 @@ export class Engine {
   private ingest = new IngestClient();
   private liveExecutor: LiveExecutor;
 
-  /* —— secretos: SOLO en memoria del motor, jamás en buildState() —— */
-  private secrets = {
-    liveApiKey: "",
-    liveApiSecret: "",
-    telegramBotToken: "",
-  };
+  /* —— credenciales por exchange: cifradas en disco, descifradas solo en memoria —— */
+  private credentials = new Map<ExchangeId, ExchangeCredentials>(
+    loadCredentials()
+  );
+  private telegramBotToken = "";
 
   /* —— módulo live (espejo real de las operaciones paper) —— */
   private livePositions = new Map<string, LivePosition>();
@@ -170,10 +183,11 @@ export class Engine {
   async start(): Promise<void> {
     this.status = "BOOTING";
     // seguridad: el live SIEMPRE arranca OFF tras reinicio — hay que reactivarlo a mano
+    // (las credenciales quedan prefilled desde el almacén cifrado)
     if (this.cfg.liveMode !== "OFF") {
       this.cfg.liveMode = "OFF";
       this.liveLastError =
-        "Live desactivado tras reinicio (seguridad) — reingresa las keys y reactívalo.";
+        `Live desactivado tras reinicio (seguridad) — credenciales de ${this.cfg.liveExchange} prefilled: reactívalo cuando quieras.`;
     }
     this.events.onStatus();
     try {
@@ -368,42 +382,47 @@ export class Engine {
 
   /* —————————————————— live trading (opt-in) —————————————————— */
 
+  private activeCreds(): ExchangeCredentials | undefined {
+    return this.credentials.get(this.cfg.liveExchange);
+  }
+
   private liveReady(): boolean {
-    return (
-      this.cfg.liveMode !== "OFF" &&
-      !!this.secrets.liveApiKey &&
-      !!this.secrets.liveApiSecret
-    );
+    const c = this.activeCreds();
+    return this.cfg.liveMode !== "OFF" && !!c?.apiKey && !!c?.apiSecret;
   }
 
   /** Espejo REAL de una apertura paper: MARKET BUY por monto acotado */
   private async mirrorOpenLive(pos: Position): Promise<void> {
     if (!this.liveReady() || this.livePositions.has(pos.symbol)) return;
+    const creds = this.activeCreds();
+    if (!creds) return;
     const size = Math.min(pos.tradeSizeUsd, this.cfg.liveMaxSizeUsd);
     if (size <= 0) return;
 
-    const res = await this.liveExecutor.marketBuy(
-      this.cfg.liveMode,
-      this.secrets.liveApiKey,
-      this.secrets.liveApiSecret,
-      pos.symbol,
-      size
-    );
-    if (res.ok && res.executedQty > 0) {
+    const res = await marketBuy({
+      exchange: this.cfg.liveExchange,
+      creds,
+      testnet: this.cfg.liveMode === "TESTNET",
+      binanceSymbol: pos.symbol,
+      amount: size,
+      referencePrice: pos.entryPrice,
+    });
+    if (res.ok) {
+      const qty = res.executedQty || pos.qty;
       this.livePositions.set(pos.symbol, {
         symbol: pos.symbol,
         orderId: res.orderId ?? null,
-        qty: res.executedQty,
-        quoteSpent: res.quoteAmount,
+        qty,
+        quoteSpent: res.quoteAmount || size,
         openedAt: Date.now(),
       });
       this.liveLastOrderAt = Date.now();
       this.liveLastError = null;
       console.log(
-        `[live] BUY ${pos.symbol} ${res.executedQty} @ ~$${res.quoteAmount.toFixed(2)} (${this.cfg.liveMode})`
+        `[live:${this.cfg.liveExchange}] BUY ${pos.symbol} qty≈${qty.toFixed(8)} @ ~$${(res.quoteAmount || size).toFixed(2)} (${this.cfg.liveMode})`
       );
     } else {
-      this.liveLastError = `BUY ${pos.symbol} falló: ${res.error ?? "sin fill"}`;
+      this.liveLastError = `BUY ${pos.symbol} (${this.cfg.liveExchange}) falló: ${res.error ?? "sin fill"}`;
       console.error(`[live] ${this.liveLastError}`);
     }
     this.emitState(true);
@@ -412,24 +431,30 @@ export class Engine {
   /** Espejo REAL de un cierre paper: MARKET SELL + PnL real + límite diario */
   private async mirrorCloseLive(trade: ClosedTrade): Promise<void> {
     const live = this.livePositions.get(trade.symbol);
-    if (!live || !this.liveReady()) {
-      // sin modo activo pero con posición espejo (kill switch path) → vender igual
-      if (live && (this.secrets.liveApiKey || this.secrets.liveApiSecret)) {
-        return this.sellLive(live, this.cfg.liveMode === "OFF" ? "LIVE" : this.cfg.liveMode);
-      }
+    if (!live) return;
+    // incluso tras kill switch (modo OFF), si hay credenciales → cerrar lo real
+    const creds = this.activeCreds();
+    if (!creds) {
+      this.liveLastError = `posición real de ${live.symbol} sin credenciales del exchange ${this.cfg.liveExchange} — cierre manual requerido`;
       return;
     }
-    await this.sellLive(live, this.cfg.liveMode);
+    await this.sellLive(live, this.cfg.liveMode === "OFF" ? "LIVE" : this.cfg.liveMode, creds, trade.exitPrice);
   }
 
-  private async sellLive(live: LivePosition, mode: "TESTNET" | "LIVE"): Promise<void> {
-    const res = await this.liveExecutor.marketSell(
-      mode,
-      this.secrets.liveApiKey,
-      this.secrets.liveApiSecret,
-      live.symbol,
-      live.qty
-    );
+  private async sellLive(
+    live: LivePosition,
+    mode: "TESTNET" | "LIVE",
+    creds: ExchangeCredentials,
+    referencePrice: number
+  ): Promise<void> {
+    const res = await marketSell({
+      exchange: this.cfg.liveExchange,
+      creds,
+      testnet: mode === "TESTNET",
+      binanceSymbol: live.symbol,
+      amount: live.qty,
+      referencePrice,
+    });
     if (res.ok) {
       const pnl = res.quoteAmount - live.quoteSpent;
       this.liveRealizedPnl += pnl;
@@ -438,7 +463,7 @@ export class Engine {
       this.liveLastOrderAt = Date.now();
       this.liveLastError = null;
       console.log(
-        `[live] SELL ${live.symbol} ${res.executedQty} → PnL $${pnl.toFixed(2)}`
+        `[live:${this.cfg.liveExchange}] SELL ${live.symbol} ${res.executedQty} → PnL $${pnl.toFixed(2)}`
       );
       // límite de pérdida diaria → kill switch automático
       if (
@@ -450,7 +475,7 @@ export class Engine {
         );
       }
     } else {
-      this.liveLastError = `SELL ${live.symbol} falló: ${res.error ?? "sin fill"} — ¡posición REAL puede seguir abierta!`;
+      this.liveLastError = `SELL ${live.symbol} (${this.cfg.liveExchange}) falló: ${res.error ?? "sin fill"} — ¡posición REAL puede seguir abierta!`;
       console.error(`[live] ${this.liveLastError}`);
     }
     this.emitState(true);
@@ -460,14 +485,21 @@ export class Engine {
   async killSwitch(reason: string): Promise<void> {
     const hadMode = this.cfg.liveMode;
     this.cfg.liveMode = "OFF";
+    const creds = this.activeCreds();
     const symbols = [...this.livePositions.keys()];
-    for (const sym of symbols) {
-      const live = this.livePositions.get(sym);
-      if (live) await this.sellLive(live, hadMode === "OFF" ? "LIVE" : hadMode);
+    if (creds) {
+      for (const sym of symbols) {
+        const live = this.livePositions.get(sym);
+        if (live) {
+          await this.sellLive(live, hadMode === "OFF" ? "LIVE" : hadMode, creds, live.quoteSpent / live.qty);
+        }
+      }
+    } else if (symbols.length > 0) {
+      this.liveLastError = `KILL SWITCH sin credenciales: posiciones reales de ${symbols.join(", ")} requieren cierre manual`;
     }
     this.liveLastError = `KILL SWITCH: ${reason}`;
     console.warn(`[live] KILL SWITCH — ${reason}`);
-    this.notifyTelegram(`⛔ <b>KILL SWITCH</b>\n${reason}`);
+    void this.notifyTelegram(`⛔ <b>KILL SWITCH</b>\n${reason}`);
     this.emitState(true);
   }
 
@@ -475,21 +507,47 @@ export class Engine {
     await this.killSwitch(reason);
   }
 
-  /* —— control de live desde la UI —— */
+  /* —— control de live desde la UI (multi-exchange) —— */
 
   setLiveConfig(patch: {
     liveMode?: EngineConfig["liveMode"];
+    liveExchange?: ExchangeId;
     liveMaxSizeUsd?: number;
     dailyLossLimitUsd?: number;
   }): { ok: boolean; error?: string } {
-    if (patch.liveMode && patch.liveMode !== "OFF") {
-      if (!this.secrets.liveApiKey || !this.secrets.liveApiSecret) {
+    if (patch.liveExchange && !EXCHANGES.some((e) => e.id === patch.liveExchange)) {
+      return { ok: false, error: "exchange desconocido" };
+    }
+    // cambiar de exchange con live activo → apagar primero
+    if (patch.liveExchange && patch.liveExchange !== this.cfg.liveExchange) {
+      if (this.cfg.liveMode !== "OFF") {
+        if (this.livePositions.size > 0) {
+          return {
+            ok: false,
+            error: "cierra las posiciones live antes de cambiar de exchange",
+          };
+        }
+        this.cfg.liveMode = "OFF";
+      }
+    }
+    const nextExchange = patch.liveExchange ?? this.cfg.liveExchange;
+    const nextMode = patch.liveMode ?? this.cfg.liveMode;
+    if (nextMode !== "OFF") {
+      const c = this.credentials.get(nextExchange);
+      if (!c?.apiKey || !c?.apiSecret) {
         return {
           ok: false,
-          error: "guarda las API keys antes de activar TESTNET/LIVE",
+          error: `guarda las credenciales de ${nextExchange} antes de activar TESTNET/LIVE`,
         };
       }
-      if (patch.liveMode === "LIVE") {
+      const meta = EXCHANGES.find((e) => e.id === nextExchange)!;
+      if (nextMode === "TESTNET" && !meta.testnetSupported) {
+        return {
+          ok: false,
+          error: `${meta.name} no soporta testnet — usa LIVE con keys reales (sin permiso de retiro)`,
+        };
+      }
+      if (nextMode === "LIVE") {
         this.liveLastError =
           "⚠️ LIVE ACTIVO — órdenes reales con dinero real. Kill switch disponible.";
       }
@@ -497,58 +555,75 @@ export class Engine {
     this.cfg = {
       ...this.cfg,
       ...(patch.liveMode !== undefined ? { liveMode: patch.liveMode } : {}),
+      ...(patch.liveExchange !== undefined ? { liveExchange: patch.liveExchange } : {}),
       ...(patch.liveMaxSizeUsd !== undefined ? { liveMaxSizeUsd: patch.liveMaxSizeUsd } : {}),
       ...(patch.dailyLossLimitUsd !== undefined
         ? { dailyLossLimitUsd: patch.dailyLossLimitUsd }
         : {}),
     };
+    if (patch.liveExchange) savePrefs({ liveExchange: this.cfg.liveExchange });
     this.events.onStatus();
     return { ok: true };
   }
 
-  setLiveKeys(apiKey: string, apiSecret: string): void {
-    this.secrets.liveApiKey = apiKey.trim();
-    this.secrets.liveApiSecret = apiSecret.trim();
+  /** Guarda credenciales de un exchange (cifra y persiste — prefill futuro) */
+  setExchangeKeys(
+    exchange: ExchangeId,
+    creds: { apiKey: string; apiSecret: string; passphrase?: string }
+  ): { ok: boolean; error?: string } {
+    if (!EXCHANGES.some((e) => e.id === exchange)) {
+      return { ok: false, error: "exchange desconocido" };
+    }
+    if (!creds.apiKey.trim() || !creds.apiSecret.trim()) {
+      return { ok: false, error: "apiKey y apiSecret requeridos" };
+    }
+    const meta = EXCHANGES.find((e) => e.id === exchange)!;
+    if (meta.needsPassphrase && !creds.passphrase?.trim()) {
+      return {
+        ok: false,
+        error: `${meta.name} requiere ${meta.passphraseLabel}`,
+      };
+    }
+    this.credentials.set(exchange, {
+      apiKey: creds.apiKey.trim(),
+      apiSecret: creds.apiSecret.trim(),
+      passphrase: creds.passphrase?.trim() || undefined,
+    });
+    saveCredentials(this.credentials);
+    this.emitState(true);
+    return { ok: true };
+  }
+
+  clearExchangeKeys(exchange: ExchangeId): void {
+    this.credentials.delete(exchange);
+    saveCredentials(this.credentials);
+    if (this.cfg.liveExchange === exchange) this.cfg.liveMode = "OFF";
     this.emitState(true);
   }
 
-  clearLiveKeys(): void {
-    this.secrets.liveApiKey = "";
-    this.secrets.liveApiSecret = "";
-    this.cfg.liveMode = "OFF";
-    this.emitState(true);
-  }
-
-  async testLiveKeys(mode: "TESTNET" | "LIVE"): Promise<{ ok: boolean; detail: string }> {
-    if (!this.secrets.liveApiKey || !this.secrets.liveApiSecret) {
-      return { ok: false, detail: "no hay keys guardadas" };
+  async testExchangeKeys(
+    exchange: ExchangeId,
+    testnet: boolean
+  ): Promise<{ ok: boolean; detail: string }> {
+    const creds = this.credentials.get(exchange);
+    if (!creds?.apiKey || !creds.apiSecret) {
+      return { ok: false, detail: "no hay credenciales guardadas para este exchange" };
     }
-    try {
-      const { balances } = await this.liveExecutor.testKeys(
-        mode,
-        this.secrets.liveApiKey,
-        this.secrets.liveApiSecret
-      );
-      this.liveLastError = null;
-      return { ok: true, detail: `conexión OK (${mode}) — ${balances} balances con saldo` };
-    } catch (err) {
-      const msg = String(err instanceof Error ? err.message : err);
-      this.liveLastError = `test de keys: ${msg}`;
-      return { ok: false, detail: msg };
-    }
+    const r = await testExchangeKeys(exchange, creds, testnet);
+    return r;
   }
 
   /* —————————————————— telegram —————————————————— */
 
   setTelegram(patch: { botToken?: string; chatId?: string; enabled?: boolean }): void {
-    if (patch.botToken !== undefined) this.secrets.telegramBotToken = patch.botToken.trim();
+    if (patch.botToken !== undefined) this.telegramBotToken = patch.botToken.trim();
     if (patch.chatId !== undefined) this.cfg.telegramChatId = patch.chatId.trim();
     if (patch.enabled !== undefined) this.cfg.telegramEnabled = patch.enabled;
     this.emitState(true);
   }
 
   async testTelegram(): Promise<{ ok: boolean; detail: string }> {
-    if (!this.secrets.telegramBotToken || !this.cfg.telegramChatId) {
+    if (!this.telegramBotToken || !this.cfg.telegramChatId) {
       return { ok: false, detail: "falta bot token o chat id" };
     }
     const res = await this.sendTelegram(
@@ -560,12 +635,12 @@ export class Engine {
   }
 
   private async sendTelegram(html: string): Promise<{ ok: boolean; error?: string }> {
-    if (!this.secrets.telegramBotToken || !this.cfg.telegramChatId) {
+    if (!this.telegramBotToken || !this.cfg.telegramChatId) {
       return { ok: false, error: "telegram no configurado" };
     }
     try {
       const res = await fetch(
-        `https://api.telegram.org/bot${this.secrets.telegramBotToken}/sendMessage`,
+        `https://api.telegram.org/bot${this.telegramBotToken}/sendMessage`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -701,7 +776,20 @@ export class Engine {
       manualWatchlist: this.watchlist,
       live: {
         mode: this.cfg.liveMode,
-        keysSet: !!this.secrets.liveApiKey && !!this.secrets.liveApiSecret,
+        exchange: this.cfg.liveExchange,
+        keysSet: !!this.activeCreds()?.apiKey,
+        /** prefill: qué exchanges tienen credenciales guardadas (cifradas) */
+        keysByExchange: Object.fromEntries(
+          EXCHANGES.map((e) => [e.id, !!this.credentials.get(e.id)?.apiKey])
+        ),
+        availableExchanges: EXCHANGES.map((e) => ({
+          id: e.id,
+          name: e.name,
+          testnetSupported: e.testnetSupported,
+          needsPassphrase: e.needsPassphrase,
+          passphraseLabel: e.passphraseLabel,
+          keyUrl: e.keyUrl,
+        })),
         maxSizeUsd: this.cfg.liveMaxSizeUsd,
         dailyLossLimitUsd: this.cfg.dailyLossLimitUsd,
         openSymbols: [...this.livePositions.keys()],
@@ -712,7 +800,7 @@ export class Engine {
       },
       telegram: {
         enabled: this.cfg.telegramEnabled,
-        tokenSet: !!this.secrets.telegramBotToken,
+        tokenSet: !!this.telegramBotToken,
         chatId: this.cfg.telegramChatId || null,
         sentCount: this.telegramSentCount,
         lastError: this.telegramLastError,
