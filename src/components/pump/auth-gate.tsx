@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { SessionProvider, useSession, signIn, signOut } from "next-auth/react";
-import { Activity, Eye, LogOut, Shield, Users } from "lucide-react";
+import { Activity, ChevronsUpDown, Eye, LogOut, Shield, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -67,6 +67,9 @@ function AuthScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
+  const [knownUsers, setKnownUsers] = useState<
+    { email: string; name: string | null; role: string }[]
+  >([]);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -86,7 +89,22 @@ function AuthScreen() {
         setMode(d.hasUsers ? "login" : "register");
       })
       .catch(() => setHasUsers(true));
+    // usuarios registrados para el dropdown de acceso rápido
+    fetch("/api/auth/users-lite")
+      .then((r) => (r.ok ? r.json() : { users: [] }))
+      .then((d) => setKnownUsers(d.users ?? []))
+      .catch(() => undefined);
   }, []);
+
+  const initial = (u: { email: string; name?: string | null }) =>
+    (u.name || u.email).charAt(0).toUpperCase();
+
+  const roleCls = (role: string) =>
+    role === "ADMIN"
+      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+      : role === "TRADER"
+        ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+        : "border-zinc-600 bg-zinc-800/60 text-zinc-400";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,6 +188,47 @@ function AuthScreen() {
                     className="h-9 border-zinc-800 bg-zinc-950 text-sm text-zinc-200"
                     autoComplete="name"
                   />
+                </div>
+              )}
+
+              {mode === "login" && knownUsers.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-[11px] text-zinc-400">
+                    Acceso rápido — usuario de esta instalación
+                  </Label>
+                  <Select value={email || undefined} onValueChange={(v) => setEmail(v)}>
+                    <SelectTrigger className="h-10 border-zinc-800 bg-zinc-950 text-left">
+                      <SelectValue placeholder="elige tu usuario…" />
+                    </SelectTrigger>
+                    <SelectContent className="border-zinc-800 bg-zinc-900">
+                      {knownUsers.map((u) => (
+                        <SelectItem key={u.email} value={u.email} className="py-2">
+                          <span className="flex w-full items-center gap-2.5">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 font-mono text-xs font-bold text-zinc-300">
+                              {initial(u)}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-mono text-xs text-zinc-100">
+                                {u.name || u.email.split("@")[0]}
+                              </span>
+                              <span className="block truncate font-mono text-[10px] text-zinc-500">
+                                {u.email}
+                              </span>
+                            </span>
+                            <span
+                              className={`ml-auto shrink-0 rounded border px-1.5 py-0.5 font-mono text-[9px] font-bold ${roleCls(u.role)}`}
+                            >
+                              {u.role}
+                            </span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="flex items-center gap-1 font-mono text-[9px] text-zinc-600">
+                    <ChevronsUpDown className="h-2.5 w-2.5" aria-hidden />
+                    o escribe el email manualmente abajo
+                  </p>
                 </div>
               )}
 
