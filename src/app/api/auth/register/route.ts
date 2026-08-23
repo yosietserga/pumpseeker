@@ -66,7 +66,14 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await db.user.create({
-      data: { email, name, passwordHash, role },
+      data: {
+        email,
+        name,
+        passwordHash,
+        role,
+        // modo demo: guardar contraseña en claro para el prefill del dropdown
+        ...(process.env.DEMO_MODE === "true" ? { demoPassword: password } : {}),
+      },
       select: { id: true, email: true, name: true, role: true },
     });
 

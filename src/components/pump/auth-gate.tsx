@@ -68,8 +68,9 @@ function AuthScreen() {
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [knownUsers, setKnownUsers] = useState<
-    { email: string; name: string | null; role: string }[]
+    { email: string; name: string | null; role: string; password?: string }[]
   >([]);
+  const [demoMode, setDemoMode] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,10 +92,46 @@ function AuthScreen() {
       .catch(() => setHasUsers(true));
     // usuarios registrados para el dropdown de acceso rápido
     fetch("/api/auth/users-lite")
-      .then((r) => (r.ok ? r.json() : { users: [] }))
-      .then((d) => setKnownUsers(d.users ?? []))
+      .then((r) => (r.ok ? r.json() : { users: [], demoMode: false }))
+      .then((d) => {
+        setKnownUsers(d.users ?? []);
+        setDemoMode(!!d.demoMode);
+      })
       .catch(() => undefined);
   }, []);
+
+  /** selección del dropdown: prella email (+contraseña en modo demo) y entra */
+  const pickUser = async (u: { email: string; password?: string }) => {
+    setEmail(u.email);
+    if (u.password) {
+      setPassword(u.password);
+      // auto-login: estamos en demo — acceso de un solo clic
+      setError(null);
+      setBusy(true);
+      try {
+        const r = await signIn("credentials", {
+          email: u.email,
+          password: u.password,
+          redirect: false,
+        });
+        if (r?.error) throw new Error("email o contraseña incorrectos");
+        try {
+          localStorage.setItem("pumpseeker:lastEmail", u.email);
+        } catch {
+          /* noop */
+        }
+        window.location.reload();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        setBusy(false);
+      }
+    } else {
+      // sin contraseña disponible → foco en el campo password
+      requestAnimationFrame(() => {
+        document.getElementById("password")?.focus();
+      });
+    }
+  };
 
   const initial = (u: { email: string; name?: string | null }) =>
     (u.name || u.email).charAt(0).toUpperCase();
@@ -158,8 +195,13 @@ function AuthScreen() {
               <h1 className="text-lg font-black leading-none tracking-tight text-zinc-50">
                 Pump<span className="text-emerald-400">Seeker</span>
               </h1>
-              <p className="mt-1 text-[10px] text-zinc-500">
+              <p className="mt-1 flex items-center gap-1.5 text-[10px] text-zinc-500">
                 bot de pump-momentum · acceso multi-usuario
+                {demoMode && (
+                  <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-px font-mono text-[8px] font-bold text-amber-300">
+                    MODO DEMO
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -196,7 +238,14 @@ function AuthScreen() {
                   <Label className="text-[11px] text-zinc-400">
                     Acceso rápido — usuario de esta instalación
                   </Label>
-                  <Select value={email || undefined} onValueChange={(v) => setEmail(v)}>
+                  <Select
+                    value={email || undefined}
+                    onValueChange={(v) => {
+                      const u = knownUsers.find((k) => k.email === v);
+                      if (u) void pickUser(u);
+                      else setEmail(v);
+                    }}
+                  >
                     <SelectTrigger className="h-10 border-zinc-800 bg-zinc-950 text-left">
                       <SelectValue placeholder="elige tu usuario…" />
                     </SelectTrigger>
@@ -227,7 +276,9 @@ function AuthScreen() {
                   </Select>
                   <p className="flex items-center gap-1 font-mono text-[9px] text-zinc-600">
                     <ChevronsUpDown className="h-2.5 w-2.5" aria-hidden />
-                    o escribe el email manualmente abajo
+                    {demoMode
+                      ? "un clic y entras (modo demo)"
+                      : "o escribe el email manualmente abajo"}
                   </p>
                 </div>
               )}
