@@ -1,0 +1,75 @@
+// Prisma schema — PumpSeeker
+// Persistencia de señales y operaciones del motor de pump momentum.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Señal de pump disparada por el detector (remake del myData 'config:*' + doorman)
+model PumpSignal {
+  id                     String   @id
+  symbol                 String
+  price                  Float
+  percentDiff            Float
+  percentDiffProgressive Float
+  volumeDiff             Float
+  volumeDiffProgressive  Float
+  quoteVolume            Float
+  score                  Float
+  moda                   Int
+  profile                String
+  createdAt              DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([symbol])
+}
+
+/// Operación de paper trading (remake del _trading del doorman, con comisiones)
+model PumpTrade {
+  id           String    @id
+  symbol       String
+  qty          Float
+  entryPrice   Float
+  exitPrice    Float?
+  takeProfit   Float
+  stopLoss     Float
+  tradeSizeUsd Float
+  status       String // OPEN | TAKE_PROFIT | STOP_LOSS | TRAILING_STOP | MANUAL
+  exitReason   String?
+  pnlUsd       Float?
+  pnlPct       Float?
+  feesUsd      Float?
+  durationSec  Int?
+  signalId     String?
+  openedAt     DateTime  @default(now())
+  closedAt     DateTime?
+
+  @@index([openedAt])
+  @@index([status])
+}
+
+/// Snapshot de estadísticas de un par en un instante — historia para
+/// comparar condiciones pasadas vs actuales y predecir comportamientos
+model MarketSnapshot {
+  id                     Int      @id @default(autoincrement())
+  symbol                 String
+  price                  Float
+  priceChangePercent     Float
+  percentDiff            Float
+  percentDiffProgressive Float
+  volumeDiff             Float
+  volumeDiffProgressive  Float
+  quoteVolume            Float
+  score                  Float
+  hotStreak              Int
+  moda                   Int
+  capturedAt             DateTime @default(now())
+
+  @@index([symbol, capturedAt])
+  @@index([capturedAt])
+}

@@ -1,0 +1,22 @@
+# dependencias
+node_modules/
+mini-services/pump-engine/node_modules/
+
+# builds
+.next/
+out/
+next-env.d.ts
+
+# runtime / datos
+db/*.db
+db/*.db-journal
+*.log
+mini-services/pump-engine/watchlist.json
+
+# entorno local (el .env del repo trae defaults seguros; los secretos van en .env.local)
+.env.local
+.env*.local
+
+# sistema
+.DS_Store
+*.pem

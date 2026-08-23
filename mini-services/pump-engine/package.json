@@ -1,0 +1,22 @@
+{
+  "name": "pump-engine",
+  "version": "1.0.0",
+  "description": "PumpSeeker engine — modern remake of yosietserga's Crypto-Trends-Seeker pump momentum detector (addChange engine + criteria chain + trailing-stop paper trading)",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot index.ts",
+    "start": "bun index.ts",
+    "start:node": "tsx index.ts"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,62 @@
+# Render Blueprint — PumpSeeker (pila completa: web + motor)
+# One-click: botón "Deploy to Render" del README (https://render.com/deploy?repo=...)
+#
+# Notas:
+# - plan free: los servicios se duermen tras inactividad (el dashboard se
+#   reconecta solo cuando despiertan). Para 24/7, usa plan starter.
+# - SQLite vive en el disco del servicio (efímero en free). Para persistencia
+#   real, sube a starter y descomenta el bloque `disk` del servicio web.
+
+services:
+  # ——————— Dashboard (Next.js + SQLite + APIs) ———————
+  - type: web
+    name: pumpseeker-web
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: .
+    buildCommand: npm install --no-audit --no-fund && npx prisma db push --accept-data-loss && npm run build
+    startCommand: npx next start
+    healthCheckPath: /api/engine
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false # default en .env (efímero) — apunta a disco para persistencia
+      # URL pública del motor (llénala tras el primer deploy del engine,
+      # o créala con el valor https://pumpseeker-engine.onrender.com):
+      - key: ENGINE_URL
+        sync: false
+      - key: NEXT_PUBLIC_ENGINE_WS_URL
+        sync: false
+      - key: NEXT_PUBLIC_ENGINE_WS_PATH
+        value: /engine
+
+  # ——————— Motor (Binance stream + detección + paper trader) ———————
+  - type: web
+    name: pumpseeker-engine
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: mini-services/pump-engine
+    buildCommand: npm install --no-audit --no-fund
+    startCommand: npx tsx index.ts
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SOCKET_PATH
+        value: /engine
+      # URL pública del web para persistir señales/trades/snapshots:
+      - key: INGEST_URL
+        sync: false
+
+  # ——————— Persistencia (opcional, requiere plan starter) ———————
+  # Descomenta y cambia el plan del servicio web a "starter":
+  # disks:
+  #   - name: pumpseeker-data
+  #     mountPath: /data
+  #     sizeGB: 1
+  # …y define DATABASE_URL=file:/data/custom.db en el servicio web.
