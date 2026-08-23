@@ -1,4 +1,8 @@
 import type { FeedStatus, MarketTick } from "./types";
+import type { LotInfo } from "./live";
+
+/** re-export para consumers */
+export type { LotInfo };
 
 /**
  * BinanceAdapter — remake del src/functions/binance.js original.
@@ -31,6 +35,8 @@ export interface AdapterState {
 export class BinanceAdapter {
   readonly watchlist = new Set<string>();
   readonly futuresSymbols = new Set<string>();
+  /** filtros LOT_SIZE/NOTIONAL por símbolo — necesarios para vender cantidades reales */
+  readonly lotInfo = new Map<string, LotInfo>();
 
   private ws: WebSocket | null = null;
   private pollTimer: Timer | null = null;
@@ -60,6 +66,20 @@ export class BinanceAdapter {
         s.baseAsset !== "USDT"
       ) {
         this.watchlist.add(s.symbol);
+        // capturar filtros de lote para ejecución real (LOT_SIZE / NOTIONAL)
+        const lot = (s.filters ?? []).find(
+          (f: any) => f.filterType === "LOT_SIZE"
+        );
+        const notional = (s.filters ?? []).find(
+          (f: any) => f.filterType === "NOTIONAL" || f.filterType === "MIN_NOTIONAL"
+        );
+        if (lot) {
+          this.lotInfo.set(s.symbol, {
+            stepSize: parseFloat(lot.stepSize ?? "0"),
+            minQty: parseFloat(lot.minQty ?? "0"),
+            minNotional: parseFloat(notional?.minNotional ?? "0"),
+          });
+        }
       }
     }
     this.events.onFeedStatus(
@@ -234,7 +254,7 @@ export class BinanceAdapter {
   }
 
   private async fetchJson<T>(url: string): Promise<T> {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
     if (!res.ok) throw new Error(`HTTP ${res.status} en ${url}`);
     return (await res.json()) as T;
   }

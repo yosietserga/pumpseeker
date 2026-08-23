@@ -65,13 +65,21 @@ function restHandler(req: IncomingMessage, res: ServerResponse): void {
   if (req.method === "POST" && url.pathname === "/control") {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const payload = JSON.parse(body || "{}") as {
           action?: string;
           config?: Partial<EngineConfig>;
           profile?: EngineConfig["profile"];
           symbol?: string;
+          liveMode?: EngineConfig["liveMode"];
+          apiKey?: string;
+          apiSecret?: string;
+          liveMaxSizeUsd?: number;
+          dailyLossLimitUsd?: number;
+          botToken?: string;
+          chatId?: string;
+          enabled?: boolean;
         };
         switch (payload.action) {
           case "start":
@@ -101,6 +109,47 @@ function restHandler(req: IncomingMessage, res: ServerResponse): void {
             if (!payload.symbol) return send(400, { ok: false, error: "symbol requerido" });
             engine.removeWatchlist(payload.symbol);
             return send(200, { ok: true, watchlist: engine.watchlist });
+          case "setLiveConfig": {
+            const r = engine.setLiveConfig({
+              liveMode: payload.liveMode,
+              liveMaxSizeUsd: payload.liveMaxSizeUsd,
+              dailyLossLimitUsd: payload.dailyLossLimitUsd,
+            });
+            if (!r.ok) return send(400, { ok: false, error: r.error });
+            return send(200, { ok: true, config: engine.config });
+          }
+          case "setLiveKeys": {
+            const { apiKey, apiSecret } = payload as { apiKey?: string; apiSecret?: string };
+            if (!apiKey || !apiSecret) {
+              return send(400, { ok: false, error: "apiKey y apiSecret requeridos" });
+            }
+            engine.setLiveKeys(apiKey, apiSecret);
+            return send(200, { ok: true, keysSet: true });
+          }
+          case "clearLiveKeys":
+            engine.clearLiveKeys();
+            return send(200, { ok: true, keysSet: false });
+          case "testLiveKeys": {
+            const mode = payload.liveMode === "LIVE" ? "LIVE" : "TESTNET";
+            const r = await engine.testLiveKeys(mode);
+            return send(r.ok ? 200 : 400, { ok: r.ok, detail: r.detail });
+          }
+          case "killSwitch":
+            await engine.killSwitch("kill switch manual desde el dashboard");
+            return send(200, { ok: true, killed: true });
+          case "setTelegram": {
+            const { botToken, chatId, enabled } = payload as {
+              botToken?: string;
+              chatId?: string;
+              enabled?: boolean;
+            };
+            engine.setTelegram({ botToken, chatId, enabled });
+            return send(200, { ok: true });
+          }
+          case "testTelegram": {
+            const r = await engine.testTelegram();
+            return send(r.ok ? 200 : 400, { ok: r.ok, detail: r.detail });
+          }
           default:
             return send(400, { ok: false, error: "acción desconocida" });
         }

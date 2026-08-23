@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { usePumpStore } from "@/lib/pump/store";
-import type { MarketRow } from "@/lib/pump/types";
+import type { MarketRow, Role } from "@/lib/pump/types";
 
 // referencias estables — evitan re-render infinito en useSyncExternalStore
 const EMPTY_WATCHLIST: string[] = [];
@@ -20,7 +20,7 @@ const EMPTY_MARKET: MarketRow[] = [];
  * Los pares marcados siempre aparecen en el radar (⭐) y entran en cada
  * snapshot de historia. Con "solo watchlist", las señales se limitan a estos.
  */
-export function WatchlistCard() {
+export function WatchlistCard({ role }: { role: Role }) {
   const state = usePumpStore((s) => s.state);
   const control = usePumpStore((s) => s.control);
   const busy = usePumpStore((s) => s.busy);
@@ -29,6 +29,7 @@ export function WatchlistCard() {
 
   const watchlist = state?.manualWatchlist ?? EMPTY_WATCHLIST;
   const watchlistOnly = state?.config.watchlistOnly ?? false;
+  const readOnly = role === "VIEWER";
   const marketSymbols = (state?.market ?? EMPTY_MARKET).map((r) => r.symbol);
 
   const add = () => {
@@ -65,10 +66,10 @@ export function WatchlistCard() {
             <Switch
               id="watchlist-only"
               checked={watchlistOnly}
-              disabled={busy}
               onCheckedChange={(v) =>
                 void control({ action: "setConfig", config: { watchlistOnly: v } })
               }
+              disabled={busy || readOnly}
               aria-label="Solo señales del watchlist"
             />
           </div>
@@ -90,7 +91,7 @@ export function WatchlistCard() {
               <button
                 type="button"
                 onClick={() => void control({ action: "watchlistRemove", symbol: sym })}
-                disabled={busy}
+                disabled={busy || readOnly}
                 className="flex h-4 w-4 items-center justify-center rounded text-amber-400/60 transition-colors hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-40"
                 aria-label={`Quitar ${sym} del watchlist`}
                 title="Quitar del watchlist"

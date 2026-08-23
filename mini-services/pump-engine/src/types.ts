@@ -82,6 +82,38 @@ export interface PumpSignal {
 
 export type ExitReason = "TAKE_PROFIT" | "STOP_LOSS" | "TRAILING_STOP" | "MANUAL";
 
+export type LiveMode = "OFF" | "TESTNET" | "LIVE";
+
+/** Posición real espejo en el exchange (el ledger de verdad sigue siendo paper) */
+export interface LivePosition {
+  symbol: string;
+  orderId: number | null;
+  qty: number;
+  quoteSpent: number;
+  openedAt: number;
+}
+
+/** Estado del módulo live — SIN secretos (nunca salen del motor) */
+export interface LiveStatus {
+  mode: LiveMode;
+  keysSet: boolean;
+  maxSizeUsd: number;
+  dailyLossLimitUsd: number;
+  openSymbols: string[];
+  realizedPnlUsd: number;
+  todayPnlUsd: number;
+  lastError: string | null;
+  lastOrderAt: number | null;
+}
+
+export interface TelegramStatus {
+  enabled: boolean;
+  tokenSet: boolean;
+  chatId: string | null;
+  sentCount: number;
+  lastError: string | null;
+}
+
 export interface Position {
   id: string;
   symbol: string;
@@ -164,6 +196,15 @@ export interface EngineConfig {
   maxOpenPositions: number;
   /** comisión taker por lado % (modernización: honestidad de costos) */
   feePct: number;
+  /* —— live trading (opt-in, keys solo en memoria del motor) —— */
+  liveMode: LiveMode;
+  /** cap por orden real en USDT */
+  liveMaxSizeUsd: number;
+  /** límite de pérdida diaria real antes del kill switch automático (0 = off) */
+  dailyLossLimitUsd: number;
+  /* —— alertas telegram —— */
+  telegramEnabled: boolean;
+  telegramChatId: string;
   /* —— historia para detección de patrones —— */
   /** cada cuántos minutos se captura un snapshot de estadísticas */
   snapshotIntervalMin: number;
@@ -235,6 +276,8 @@ export interface EngineState {
   config: EngineConfig;
   /** pares del watchlist manual (persistido en disco) */
   manualWatchlist: string[];
+  live: LiveStatus;
+  telegram: TelegramStatus;
   marketStats: {
     watchlist: number;
     futuresSymbols: number;

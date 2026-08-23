@@ -5,12 +5,15 @@ import type {
   EngineConfig,
   EngineState,
   FeedStatus,
+  LivePosition,
+  LiveStatus,
   MarketRow,
   MarketTick,
   Position,
   PumpSignal,
   SnapshotRow,
   SymbolState,
+  TelegramStatus,
 } from "./types";
 import { BASE_CONFIG, applyProfile } from "./profiles";
 import { ChangeTracker } from "./tracker";
@@ -19,6 +22,7 @@ import { PumpDetector } from "./detector";
 import { PaperTrader } from "./trader";
 import { BinanceAdapter } from "./exchange";
 import { IngestClient } from "./ingest";
+import { LiveExecutor } from "./live";
 
 const WATCHLIST_FILE = fileURLToPath(new URL("../watchlist.json", import.meta.url));
 
@@ -69,6 +73,24 @@ export class Engine {
   private trader = new PaperTrader(() => this.cfg);
   private adapter: BinanceAdapter;
   private ingest = new IngestClient();
+  private liveExecutor: LiveExecutor;
+
+  /* —— secretos: SOLO en memoria del motor, jamás en buildState() —— */
+  private secrets = {
+    liveApiKey: "",
+    liveApiSecret: "",
+    telegramBotToken: "",
+  };
+
+  /* —— módulo live (espejo real de las operaciones paper) —— */
+  private livePositions = new Map<string, LivePosition>();
+  private liveRealizedPnl = 0;
+  private liveTodayPnl = 0;
+  private liveTodayDay = "";
+  private liveLastError: string | null = null;
+  private liveLastOrderAt: number | null = null;
+  private telegramSentCount = 0;
+  private telegramLastError: string | null = null;
 
   /** watchlist manual del usuario — persistida en watchlist.json */
   private manualWatchlist = new Set<string>(loadWatchlistFile());
@@ -97,6 +119,9 @@ export class Engine {
         this.events.onStatus();
       },
     });
+    this.liveExecutor = new LiveExecutor((symbol) =>
+      this.adapter.lotInfo.get(symbol)
+    );
   }
 
   get config(): EngineConfig {
@@ -144,6 +169,12 @@ export class Engine {
   /** Arranque: bootstrap + feed (antes: manager.start(ex) → doorman.start()) */
   async start(): Promise<void> {
     this.status = "BOOTING";
+    // seguridad: el live SIEMPRE arranca OFF tras reinicio — hay que reactivarlo a mano
+    if (this.cfg.liveMode !== "OFF") {
+      this.cfg.liveMode = "OFF";
+      this.liveLastError =
+        "Live desactivado tras reinicio (seguridad) — reingresa las keys y reactívalo.";
+    }
     this.events.onStatus();
     try {
       await this.adapter.bootstrap();
@@ -168,6 +199,11 @@ export class Engine {
       clearInterval(this.snapTimer);
       this.snapTimer = null;
     }
+    // posiciones reales abiertas: cierre best-effort antes de detener
+    if (this.livePositions.size > 0 && this.cfg.liveMode !== "OFF") {
+      void this.closeAllLive("motor detenido");
+    }
+    this.cfg.liveMode = "OFF";
     this.status = "STOPPED";
     this.feedStatus = "DOWN";
     this.feedDetail = "motor detenido por el usuario";
@@ -188,6 +224,8 @@ export class Engine {
     const t = this.trader.closeManual(symbol);
     if (t) {
       this.ingest.trade(t);
+      void this.mirrorCloseLive(t);
+      this.notifyTelegramTrade(t);
       this.events.onTradeClosed(t);
       this.emitState(true);
     }
@@ -198,6 +236,8 @@ export class Engine {
     const out = this.trader.closeAllManual();
     for (const t of out) {
       this.ingest.trade(t);
+      void this.mirrorCloseLive(t);
+      this.notifyTelegramTrade(t);
       this.events.onTradeClosed(t);
     }
     if (out.length) this.emitState(true);
@@ -236,7 +276,12 @@ export class Engine {
       if (signal) {
         const pos = this.trader.openFromSignal(signal);
         this.ingest.signal(signal);
-        if (pos) this.ingest.positionOpened(pos);
+        if (pos) {
+          this.ingest.positionOpened(pos);
+          // espejo real (opt-in): la misma señal ejecuta orden REAL a mercado
+          void this.mirrorOpenLive(pos);
+        }
+        this.notifyTelegramSignal(signal);
         this.events.onSignal(signal, pos);
       }
 
@@ -244,6 +289,8 @@ export class Engine {
       const closed = this.trader.updatePrice(st.symbol, tick.lastPrice);
       if (closed) {
         this.ingest.trade(closed);
+        void this.mirrorCloseLive(closed);
+        this.notifyTelegramTrade(closed);
         this.events.onTradeClosed(closed);
       }
     }
@@ -319,6 +366,265 @@ export class Engine {
     };
   }
 
+  /* —————————————————— live trading (opt-in) —————————————————— */
+
+  private liveReady(): boolean {
+    return (
+      this.cfg.liveMode !== "OFF" &&
+      !!this.secrets.liveApiKey &&
+      !!this.secrets.liveApiSecret
+    );
+  }
+
+  /** Espejo REAL de una apertura paper: MARKET BUY por monto acotado */
+  private async mirrorOpenLive(pos: Position): Promise<void> {
+    if (!this.liveReady() || this.livePositions.has(pos.symbol)) return;
+    const size = Math.min(pos.tradeSizeUsd, this.cfg.liveMaxSizeUsd);
+    if (size <= 0) return;
+
+    const res = await this.liveExecutor.marketBuy(
+      this.cfg.liveMode,
+      this.secrets.liveApiKey,
+      this.secrets.liveApiSecret,
+      pos.symbol,
+      size
+    );
+    if (res.ok && res.executedQty > 0) {
+      this.livePositions.set(pos.symbol, {
+        symbol: pos.symbol,
+        orderId: res.orderId ?? null,
+        qty: res.executedQty,
+        quoteSpent: res.quoteAmount,
+        openedAt: Date.now(),
+      });
+      this.liveLastOrderAt = Date.now();
+      this.liveLastError = null;
+      console.log(
+        `[live] BUY ${pos.symbol} ${res.executedQty} @ ~$${res.quoteAmount.toFixed(2)} (${this.cfg.liveMode})`
+      );
+    } else {
+      this.liveLastError = `BUY ${pos.symbol} falló: ${res.error ?? "sin fill"}`;
+      console.error(`[live] ${this.liveLastError}`);
+    }
+    this.emitState(true);
+  }
+
+  /** Espejo REAL de un cierre paper: MARKET SELL + PnL real + límite diario */
+  private async mirrorCloseLive(trade: ClosedTrade): Promise<void> {
+    const live = this.livePositions.get(trade.symbol);
+    if (!live || !this.liveReady()) {
+      // sin modo activo pero con posición espejo (kill switch path) → vender igual
+      if (live && (this.secrets.liveApiKey || this.secrets.liveApiSecret)) {
+        return this.sellLive(live, this.cfg.liveMode === "OFF" ? "LIVE" : this.cfg.liveMode);
+      }
+      return;
+    }
+    await this.sellLive(live, this.cfg.liveMode);
+  }
+
+  private async sellLive(live: LivePosition, mode: "TESTNET" | "LIVE"): Promise<void> {
+    const res = await this.liveExecutor.marketSell(
+      mode,
+      this.secrets.liveApiKey,
+      this.secrets.liveApiSecret,
+      live.symbol,
+      live.qty
+    );
+    if (res.ok) {
+      const pnl = res.quoteAmount - live.quoteSpent;
+      this.liveRealizedPnl += pnl;
+      this.liveTodayPnl += pnl;
+      this.livePositions.delete(live.symbol);
+      this.liveLastOrderAt = Date.now();
+      this.liveLastError = null;
+      console.log(
+        `[live] SELL ${live.symbol} ${res.executedQty} → PnL $${pnl.toFixed(2)}`
+      );
+      // límite de pérdida diaria → kill switch automático
+      if (
+        this.cfg.dailyLossLimitUsd > 0 &&
+        this.liveTodayPnl <= -this.cfg.dailyLossLimitUsd
+      ) {
+        await this.killSwitch(
+          `límite de pérdida diaria alcanzado ($${this.liveTodayPnl.toFixed(2)})`
+        );
+      }
+    } else {
+      this.liveLastError = `SELL ${live.symbol} falló: ${res.error ?? "sin fill"} — ¡posición REAL puede seguir abierta!`;
+      console.error(`[live] ${this.liveLastError}`);
+    }
+    this.emitState(true);
+  }
+
+  /** KILL SWITCH: modo OFF + venta a mercado de TODO lo real + alerta */
+  async killSwitch(reason: string): Promise<void> {
+    const hadMode = this.cfg.liveMode;
+    this.cfg.liveMode = "OFF";
+    const symbols = [...this.livePositions.keys()];
+    for (const sym of symbols) {
+      const live = this.livePositions.get(sym);
+      if (live) await this.sellLive(live, hadMode === "OFF" ? "LIVE" : hadMode);
+    }
+    this.liveLastError = `KILL SWITCH: ${reason}`;
+    console.warn(`[live] KILL SWITCH — ${reason}`);
+    this.notifyTelegram(`⛔ <b>KILL SWITCH</b>\n${reason}`);
+    this.emitState(true);
+  }
+
+  private async closeAllLive(reason: string): Promise<void> {
+    await this.killSwitch(reason);
+  }
+
+  /* —— control de live desde la UI —— */
+
+  setLiveConfig(patch: {
+    liveMode?: EngineConfig["liveMode"];
+    liveMaxSizeUsd?: number;
+    dailyLossLimitUsd?: number;
+  }): { ok: boolean; error?: string } {
+    if (patch.liveMode && patch.liveMode !== "OFF") {
+      if (!this.secrets.liveApiKey || !this.secrets.liveApiSecret) {
+        return {
+          ok: false,
+          error: "guarda las API keys antes de activar TESTNET/LIVE",
+        };
+      }
+      if (patch.liveMode === "LIVE") {
+        this.liveLastError =
+          "⚠️ LIVE ACTIVO — órdenes reales con dinero real. Kill switch disponible.";
+      }
+    }
+    this.cfg = {
+      ...this.cfg,
+      ...(patch.liveMode !== undefined ? { liveMode: patch.liveMode } : {}),
+      ...(patch.liveMaxSizeUsd !== undefined ? { liveMaxSizeUsd: patch.liveMaxSizeUsd } : {}),
+      ...(patch.dailyLossLimitUsd !== undefined
+        ? { dailyLossLimitUsd: patch.dailyLossLimitUsd }
+        : {}),
+    };
+    this.events.onStatus();
+    return { ok: true };
+  }
+
+  setLiveKeys(apiKey: string, apiSecret: string): void {
+    this.secrets.liveApiKey = apiKey.trim();
+    this.secrets.liveApiSecret = apiSecret.trim();
+    this.emitState(true);
+  }
+
+  clearLiveKeys(): void {
+    this.secrets.liveApiKey = "";
+    this.secrets.liveApiSecret = "";
+    this.cfg.liveMode = "OFF";
+    this.emitState(true);
+  }
+
+  async testLiveKeys(mode: "TESTNET" | "LIVE"): Promise<{ ok: boolean; detail: string }> {
+    if (!this.secrets.liveApiKey || !this.secrets.liveApiSecret) {
+      return { ok: false, detail: "no hay keys guardadas" };
+    }
+    try {
+      const { balances } = await this.liveExecutor.testKeys(
+        mode,
+        this.secrets.liveApiKey,
+        this.secrets.liveApiSecret
+      );
+      this.liveLastError = null;
+      return { ok: true, detail: `conexión OK (${mode}) — ${balances} balances con saldo` };
+    } catch (err) {
+      const msg = String(err instanceof Error ? err.message : err);
+      this.liveLastError = `test de keys: ${msg}`;
+      return { ok: false, detail: msg };
+    }
+  }
+
+  /* —————————————————— telegram —————————————————— */
+
+  setTelegram(patch: { botToken?: string; chatId?: string; enabled?: boolean }): void {
+    if (patch.botToken !== undefined) this.secrets.telegramBotToken = patch.botToken.trim();
+    if (patch.chatId !== undefined) this.cfg.telegramChatId = patch.chatId.trim();
+    if (patch.enabled !== undefined) this.cfg.telegramEnabled = patch.enabled;
+    this.emitState(true);
+  }
+
+  async testTelegram(): Promise<{ ok: boolean; detail: string }> {
+    if (!this.secrets.telegramBotToken || !this.cfg.telegramChatId) {
+      return { ok: false, detail: "falta bot token o chat id" };
+    }
+    const res = await this.sendTelegram(
+      "✅ <b>PumpSeeker conectado</b> — recibirás señales y cierres aquí."
+    );
+    return res.ok
+      ? { ok: true, detail: "mensaje de prueba enviado" }
+      : { ok: false, detail: res.error ?? "error desconocido" };
+  }
+
+  private async sendTelegram(html: string): Promise<{ ok: boolean; error?: string }> {
+    if (!this.secrets.telegramBotToken || !this.cfg.telegramChatId) {
+      return { ok: false, error: "telegram no configurado" };
+    }
+    try {
+      const res = await fetch(
+        `https://api.telegram.org/bot${this.secrets.telegramBotToken}/sendMessage`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: this.cfg.telegramChatId,
+            text: html,
+            parse_mode: "HTML",
+          }),
+          signal: AbortSignal.timeout(10000),
+        }
+      );
+      const data = (await res.json().catch(() => ({}))) as any;
+      if (!res.ok || data?.ok !== true) {
+        this.telegramLastError = data?.description ?? `HTTP ${res.status}`;
+        return { ok: false, error: this.telegramLastError };
+      }
+      this.telegramSentCount += 1;
+      this.telegramLastError = null;
+      return { ok: true };
+    } catch (err) {
+      this.telegramLastError = String(err instanceof Error ? err.message : err);
+      return { ok: false, error: this.telegramLastError };
+    }
+  }
+
+  private notifyTelegramSignal(sig: PumpSignal): void {
+    if (!this.cfg.telegramEnabled) return;
+    const m = sig.metrics;
+    void this.sendTelegram(
+      `🚀 <b>PUMP ${sig.symbol}</b>\n` +
+        `score ${sig.score.toFixed(0)} · moda ×${sig.moda}\n` +
+        `Δvol ${m.volumeDiff.toFixed(2)}% · Δvol inst ${m.volumeDiffProgressive.toFixed(3)}%\n` +
+        `Δprecio ${m.percentDiff.toFixed(2)}% · 24h ${m.priceChangePercent.toFixed(2)}%\n` +
+        `precio ${sig.price}`
+    );
+  }
+
+  private notifyTelegramTrade(t: ClosedTrade): void {
+    if (!this.cfg.telegramEnabled) return;
+    const icon =
+      t.exitReason === "TAKE_PROFIT"
+        ? "🟢"
+        : t.exitReason === "STOP_LOSS"
+          ? "🔴"
+          : t.exitReason === "TRAILING_STOP"
+            ? "🟣"
+            : "⚪";
+    void this.sendTelegram(
+      `${icon} <b>${t.exitReason} ${t.symbol}</b>\n` +
+        `PnL ${t.pnlUsd >= 0 ? "+" : ""}$${t.pnlUsd.toFixed(2)} (${t.roePct.toFixed(2)}%)\n` +
+        `duración ${t.durationSec}s${t.wasTrailing ? " · trailing armado" : ""}`
+    );
+  }
+
+  private notifyTelegram(html: string): void {
+    if (!this.cfg.telegramEnabled) return;
+    void this.sendTelegram(html);
+  }
+
   /* —————————————————— estado para UI/API —————————————————— */
 
   private rowFromState(st: SymbolState, ctx: CriteriaContext): MarketRow | null {
@@ -348,6 +654,13 @@ export class Engine {
   buildState(): EngineState {
     const now = Date.now();
     const ctx = this.ctx();
+
+    // rollover diario del PnL live
+    const today = new Date().toISOString().slice(0, 10);
+    if (this.liveTodayDay !== today) {
+      this.liveTodayDay = today;
+      this.liveTodayPnl = 0;
+    }
 
     // métricas de throughput
     if (!this.lastStateEmit) this.lastStateEmit = now;
@@ -386,6 +699,24 @@ export class Engine {
       feedDetail: this.feedDetail,
       config: { ...this.cfg },
       manualWatchlist: this.watchlist,
+      live: {
+        mode: this.cfg.liveMode,
+        keysSet: !!this.secrets.liveApiKey && !!this.secrets.liveApiSecret,
+        maxSizeUsd: this.cfg.liveMaxSizeUsd,
+        dailyLossLimitUsd: this.cfg.dailyLossLimitUsd,
+        openSymbols: [...this.livePositions.keys()],
+        realizedPnlUsd: Math.round(this.liveRealizedPnl * 100) / 100,
+        todayPnlUsd: Math.round(this.liveTodayPnl * 100) / 100,
+        lastError: this.liveLastError,
+        lastOrderAt: this.liveLastOrderAt,
+      },
+      telegram: {
+        enabled: this.cfg.telegramEnabled,
+        tokenSet: !!this.secrets.telegramBotToken,
+        chatId: this.cfg.telegramChatId || null,
+        sentCount: this.telegramSentCount,
+        lastError: this.telegramLastError,
+      },
       marketStats: {
         watchlist: this.adapter.watchlist.size,
         futuresSymbols: this.adapter.futuresSymbols.size,

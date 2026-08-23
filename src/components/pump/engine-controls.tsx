@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { usePumpStore } from "@/lib/pump/store";
-import type { EngineConfig } from "@/lib/pump/types";
+import type { EngineConfig, Role } from "@/lib/pump/types";
 
 /**
  * EngineControls — remake del menú inquirer de cli/index.js:
@@ -41,13 +41,14 @@ function Field({
   );
 }
 
-export function EngineControls() {
+export function EngineControls({ role }: { role: Role }) {
   const state = usePumpStore((s) => s.state);
   const control = usePumpStore((s) => s.control);
   const busy = usePumpStore((s) => s.busy);
 
   const [draft, setDraft] = useState<EngineConfig | null>(null);
   const [open, setOpen] = useState(false);
+  const readOnly = role === "VIEWER";
 
   if (!state) {
     return (
@@ -122,7 +123,15 @@ export function EngineControls() {
               </div>
             )}
 
-            <div className="grid gap-x-6 gap-y-5 md:grid-cols-2 xl:grid-cols-3">
+            {readOnly && (
+              <p className="mb-4 rounded-lg border border-zinc-700 bg-zinc-950/60 px-3 py-2 font-mono text-[11px] text-zinc-400">
+                rol VIEWER — parámetros en solo lectura (un TRADER/ADMIN puede editarlos)
+              </p>
+            )}
+            <div
+              className={`grid gap-x-6 gap-y-5 md:grid-cols-2 xl:grid-cols-3 ${readOnly ? "pointer-events-none opacity-60" : ""}`}
+              aria-readonly={readOnly}
+            >
               {/* —— detección —— */}
               <Field
                 label="Volumen 24h mínimo"
@@ -332,7 +341,7 @@ export function EngineControls() {
               <Button
                 size="sm"
                 className="h-9 bg-emerald-600 font-mono text-xs text-white hover:bg-emerald-500"
-                disabled={!dirty || busy}
+                disabled={!dirty || busy || readOnly}
                 onClick={() => {
                   if (draft) void control({ action: "setConfig", config: draft });
                 }}

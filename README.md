@@ -15,6 +15,19 @@ señal — automatizada con trailing stop, y un laboratorio de patrones con hist
 
 ---
 
+## Características destacadas
+
+- **Trading real opt-in** — paper es el default; activa TESTNET (sin riesgo) o LIVE
+  con tus API keys de Binance (solo permiso de spot trade). Keys guardadas
+  **únicamente en memoria del motor**; kill switch manual + límite de pérdida
+  diaria con kill automático; el modo se fuerza a OFF tras cada reinicio.
+- **Multi-usuario con roles** — ADMIN (todo) / TRADER (control del motor) /
+  VIEWER (solo lectura). Primer usuario = ADMIN. Basado en NextAuth + bcrypt.
+- **Alertas Telegram** — cada señal 🚀 y cada cierre (TP/SL/TRAIL con PnL)
+  directo a tu chat (remake del node-notifier del original).
+- Laboratorio de patrones, trailing stop real, watchlist persistente,
+  radar de momentum en vivo — ver README de features anterior.
+
 ## Cómo funciona
 
 ```
@@ -110,8 +123,19 @@ bun run dev
 bun run engine:dev
 ```
 
-Abre http://localhost:3000 — el motor arranca solo, se conecta a Binance y
-comienza a detectar. El `watchlist.json` del motor persiste tus pares favoritos.
+Abre http://localhost:3000 — el primer usuario que se registra se convierte en
+ADMIN. El motor arranca solo, se conecta a Binance y comienza a detectar. El
+`watchlist.json` del motor persiste tus pares favoritos.
+
+### Trading real (opt-in)
+
+1. Como ADMIN: guarda tus API keys de Binance (solo permiso **spot trade**,
+   sin retiros) en la tarjeta "Trading real".
+2. Prueba con **TESTNET** (keys de testnet.binance.vision) — flujo completo sin riesgo.
+3. Ajusta el cap por orden (`liveMaxSizeUsd`) y el límite de pérdida diaria
+   (`dailyLossLimitUsd` — 0 lo desactiva).
+4. Activa **LIVE** cuando confíes. El botón **KILL SWITCH** vende todo a mercado
+   y desactiva el modo en cualquier momento.
 
 ## Variables de entorno
 
@@ -122,6 +146,8 @@ comienza a detectar. El `watchlist.json` del motor persiste tus pares favoritos.
 | `NEXT_PUBLIC_ENGINE_WS_URL` | web | *(vacío = local)* | URL pública del socket.io del motor |
 | `NEXT_PUBLIC_ENGINE_WS_PATH` | web | `/engine` | Path del socket (modo nube) |
 | `INGEST_URL` | motor | `http://localhost:3000/api/ingest` | Endpoint de persistencia del web |
+| `NEXTAUTH_SECRET` | web | *(generar)* | Secreto de sesión (obligatorio en producción) |
+| `NEXTAUTH_URL` | web | `http://localhost:3000` | URL pública del web |
 | `SOCKET_PATH` | motor | *(vacío = local)* | `/engine` = modo nube single-port |
 | `PORT` / `SOCKET_PORT` | motor | `3003` | Puerto del socket.io |
 | `REST_PORT` | motor | `3004` | Puerto REST (solo modo local) |

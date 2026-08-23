@@ -32,6 +32,13 @@ export const BASE_CONFIG: EngineConfig = {
   trailingDistancePct: 1,
   maxOpenPositions: 5,
   feePct: 0.1,
+  /* —— live trading (opt-in): OFF por defecto, keys solo en memoria —— */
+  liveMode: "OFF",
+  liveMaxSizeUsd: 50,
+  dailyLossLimitUsd: 25,
+  /* —— alertas telegram —— */
+  telegramEnabled: false,
+  telegramChatId: "",
   // historia para patrones: snapshot cada 3 min
   snapshotIntervalMin: 3,
 };

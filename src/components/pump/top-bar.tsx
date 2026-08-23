@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Radio, RefreshCcw, Square, Play } from "lucide-react";
+import { Activity, LogOut, Radio, RefreshCcw, Square, Play } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,8 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { RoleBadge, UserManager } from "@/components/pump/auth-gate";
 import { usePumpStore } from "@/lib/pump/store";
-import type { ProfileName } from "@/lib/pump/types";
+import type { ProfileName, Role } from "@/lib/pump/types";
 import { cn } from "@/lib/utils";
 
 const PROFILE_LABELS: Record<ProfileName, string> = {
@@ -21,7 +22,15 @@ const PROFILE_LABELS: Record<ProfileName, string> = {
   CUSTOM: "Personalizado",
 };
 
-export function TopBar() {
+export function TopBar({
+  userName,
+  userRole,
+  onLogout,
+}: {
+  userName: string;
+  userRole: Role;
+  onLogout: () => void;
+}) {
   const state = usePumpStore((s) => s.state);
   const socketConnected = usePumpStore((s) => s.socketConnected);
   const busy = usePumpStore((s) => s.busy);
@@ -30,6 +39,8 @@ export function TopBar() {
   const status = state?.status ?? "BOOTING";
   const feed = state?.feed ?? "DOWN";
   const running = status === "RUNNING";
+  const liveMode = state?.live.mode ?? "OFF";
+  const readOnly = userRole === "VIEWER";
 
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/80">
@@ -93,6 +104,37 @@ export function TopBar() {
             <span className={cn("h-1.5 w-1.5 rounded-full", socketConnected ? "bg-emerald-400" : "bg-zinc-600")} aria-hidden />
             ws {socketConnected ? "on" : "off"}
           </Badge>
+          {liveMode !== "OFF" && (
+            <Badge
+              className={cn(
+                "gap-1 border font-mono text-[10px] font-bold",
+                liveMode === "LIVE"
+                  ? "animate-pulse border-rose-500/50 bg-rose-500/15 text-rose-300"
+                  : "border-amber-500/40 bg-amber-500/10 text-amber-300"
+              )}
+              variant="outline"
+            >
+              {liveMode === "LIVE" ? "● LIVE" : "TESTNET"}
+            </Badge>
+          )}
+          {/* usuario */}
+          <div className="flex items-center gap-1.5">
+            <span className="hidden max-w-[120px] truncate font-mono text-[11px] text-zinc-400 sm:block" title={userName}>
+              {userName}
+            </span>
+            <RoleBadge role={userRole} />
+            {userRole === "ADMIN" && <UserManager />}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              onClick={onLogout}
+              aria-label="Cerrar sesión"
+              title="Cerrar sesión"
+            >
+              <LogOut className="h-3.5 w-3.5" aria-hidden />
+            </Button>
+          </div>
         </div>
 
         {/* controles */}
@@ -100,7 +142,7 @@ export function TopBar() {
           <Select
             value={state?.config.profile ?? "SCALPING"}
             onValueChange={(v) => void control({ action: "setProfile", profile: v as ProfileName })}
-            disabled={busy}
+            disabled={busy || readOnly}
           >
             <SelectTrigger className="h-9 w-full border-zinc-800 bg-zinc-900 font-mono text-xs text-zinc-200 sm:w-[230px]">
               <SelectValue placeholder="perfil" />
@@ -119,7 +161,7 @@ export function TopBar() {
               variant="destructive"
               size="sm"
               className="h-9 gap-1.5 font-mono text-xs"
-              disabled={busy}
+              disabled={busy || readOnly}
               onClick={() => void control({ action: "stop" })}
             >
               <Square className="h-3.5 w-3.5" aria-hidden />
@@ -129,7 +171,7 @@ export function TopBar() {
             <Button
               size="sm"
               className="h-9 gap-1.5 bg-emerald-600 font-mono text-xs text-white hover:bg-emerald-500"
-              disabled={busy}
+              disabled={busy || readOnly}
               onClick={() => void control({ action: "start" })}
             >
               {status === "BOOTING" ? (

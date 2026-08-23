@@ -35,6 +35,28 @@ export interface PumpSignal {
 
 export type ExitReason = "TAKE_PROFIT" | "STOP_LOSS" | "TRAILING_STOP" | "MANUAL";
 
+export type LiveMode = "OFF" | "TESTNET" | "LIVE";
+
+export interface LiveStatus {
+  mode: LiveMode;
+  keysSet: boolean;
+  maxSizeUsd: number;
+  dailyLossLimitUsd: number;
+  openSymbols: string[];
+  realizedPnlUsd: number;
+  todayPnlUsd: number;
+  lastError: string | null;
+  lastOrderAt: number | null;
+}
+
+export interface TelegramStatus {
+  enabled: boolean;
+  tokenSet: boolean;
+  chatId: string | null;
+  sentCount: number;
+  lastError: string | null;
+}
+
 export interface Position {
   id: string;
   symbol: string;
@@ -100,6 +122,13 @@ export interface EngineConfig {
   trailingDistancePct: number;
   maxOpenPositions: number;
   feePct: number;
+  /* —— live trading (opt-in) —— */
+  liveMode: LiveMode;
+  liveMaxSizeUsd: number;
+  dailyLossLimitUsd: number;
+  /* —— alertas telegram —— */
+  telegramEnabled: boolean;
+  telegramChatId: string;
   /** cada cuántos minutos se captura un snapshot de historia */
   snapshotIntervalMin: number;
 }
@@ -148,6 +177,8 @@ export interface EngineState {
   config: EngineConfig;
   /** pares del watchlist manual (persistido en disco) */
   manualWatchlist: string[];
+  live: LiveStatus;
+  telegram: TelegramStatus;
   marketStats: {
     watchlist: number;
     futuresSymbols: number;
@@ -173,4 +204,13 @@ export type ControlAction =
   | { action: "closePosition"; symbol: string }
   | { action: "closeAll" }
   | { action: "watchlistAdd"; symbol: string }
-  | { action: "watchlistRemove"; symbol: string };
+  | { action: "watchlistRemove"; symbol: string }
+  | { action: "setLiveConfig"; liveMode?: LiveMode; liveMaxSizeUsd?: number; dailyLossLimitUsd?: number }
+  | { action: "setLiveKeys"; apiKey: string; apiSecret: string }
+  | { action: "clearLiveKeys" }
+  | { action: "testLiveKeys"; liveMode: "TESTNET" | "LIVE" }
+  | { action: "killSwitch" }
+  | { action: "setTelegram"; botToken?: string; chatId?: string; enabled?: boolean }
+  | { action: "testTelegram" };
+
+export type Role = "ADMIN" | "TRADER" | "VIEWER";

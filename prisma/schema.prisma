@@ -10,6 +10,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Usuario del dashboard (multi-usuario con roles — justifica Extended License)
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  /// ADMIN | TRADER | VIEWER
+  role         String   @default("VIEWER")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 /// Señal de pump disparada por el detector (remake del myData 'config:*' + doorman)
 model PumpSignal {
   id                     String   @id

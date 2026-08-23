@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/table";
 import { usePumpStore } from "@/lib/pump/store";
 import { fmtDuration, fmtMoney, fmtPct, fmtPrice, clockTime } from "@/lib/pump/format";
-import type { ClosedTrade, ExitReason, Position } from "@/lib/pump/types";
+import type { ClosedTrade, ExitReason, Position, Role } from "@/lib/pump/types";
 import { cn } from "@/lib/utils";
 
 // referencias estables — evitan re-render infinito en useSyncExternalStore
@@ -45,12 +45,14 @@ const REASON_META: Record<ExitReason, { label: string; cls: string }> = {
  * TP/SL amplios de órbita, y un trailing que se arma con +N% REAL desde la
  * entrada y persigue al pico con M% de distancia (todo parametrizable).
  */
-export function Positions() {
+export function Positions({ role }: { role: Role }) {
   const state = usePumpStore((s) => s.state);
   const positions = state?.positions ?? EMPTY_POSITIONS;
   const trades = state?.trades ?? EMPTY_TRADES;
   const busy = usePumpStore((s) => s.busy);
   const control = usePumpStore((s) => s.control);
+  const readOnly = role === "VIEWER";
+  const liveOpen = state?.live.openSymbols ?? [];
 
   return (
     <Card className="min-w-0 border-zinc-800 bg-zinc-900/50 p-0">
@@ -68,7 +70,7 @@ export function Positions() {
               size="sm"
               variant="outline"
               className="h-7 border-rose-500/40 font-mono text-[10px] text-rose-300 hover:bg-rose-500/10"
-              disabled={busy}
+              disabled={busy || readOnly}
               onClick={() => void control({ action: "closeAll" })}
             >
               Cerrar todo
@@ -133,6 +135,14 @@ export function Positions() {
                           <TableCell className="whitespace-nowrap px-3 py-2 font-mono text-xs font-bold text-zinc-100">
                             {p.symbol.replace("USDT", "")}
                             <span className="text-zinc-600">/USDT</span>
+                            {liveOpen.includes(p.symbol) && (
+                              <span
+                                className="ml-1.5 rounded border border-rose-500/50 bg-rose-500/15 px-1 py-px font-mono text-[9px] font-bold text-rose-300"
+                                title="posición REAL abierta en el exchange"
+                              >
+                                LIVE
+                              </span>
+                            )}
                           </TableCell>
                           <TableCell className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-300">
                             {fmtPrice(p.entryPrice)}
@@ -202,7 +212,7 @@ export function Positions() {
                               size="sm"
                               variant="ghost"
                               className="h-6 w-6 p-0 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-400"
-                              disabled={busy}
+                              disabled={busy || readOnly}
                               onClick={() =>
                                 void control({ action: "closePosition", symbol: p.symbol })
                               }
