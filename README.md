@@ -6,6 +6,10 @@
 de detección — `addChange` → cadena de criterios → ocurrencias/confirmaciones →
 señal — automatizada con trailing stop, y un laboratorio de patrones con historia.
 
+![PumpSeeker Dashboard](public/screenshots/dashboard-preview.png)
+
+**▶ LIVE DEMO:** [https://preview-chat-d8e50fb9-126f-40c7-b5b2-325062188d03.space-z.ai/](https://preview-chat-d8e50fb9-126f-40c7-b5b2-325062188d03.space-z.ai/)
+
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/github/yosietserga/pumpseeker)
 [![Deploy to Render](https://render.com/images/deploy-button.svg)](https://render.com/deploy?repo=https://github.com/yosietserga/pumpseeker)
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/yosietserga/pumpseeker&env=ENGINE_URL,NEXT_PUBLIC_ENGINE_WS_URL&envDescription=URLs%20del%20motor%20para%20conectar%20el%20dashboard)
